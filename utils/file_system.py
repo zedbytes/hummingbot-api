@@ -229,7 +229,59 @@ class FileSystemUtil:
         except Exception as e:
             logging.error("Error writing configs: %s" % (str(e),), exc_info=True)
 
+    def get_base_path(self):
+        """
+        Returns the base path for file operations
+        :return: The base path string
+        """
+        return self.base_path
+        
+    def get_directory_creation_time(self, path):
+        """
+        Get the creation time of a directory
+        :param path: The path to the directory
+        :return: ISO formatted creation time string or None if directory doesn't exist
+        """
+        import os
+        import datetime
+        
+        full_path = os.path.join(self.base_path, path)
+        if not os.path.exists(full_path):
+            return None
+            
+        # Get creation time (platform dependent)
+        try:
+            # For Unix systems, use stat
+            creation_time = os.stat(full_path).st_ctime
+            # Convert to datetime
+            return datetime.datetime.fromtimestamp(creation_time).isoformat()
+        except Exception:
+            # Fallback
+            return "unknown"
+            
+    def list_directories(self, path):
+        """
+        List all directories within a given path
+        :param path: The path to list directories from
+        :return: List of directory names
+        """
+        import os
+        
+        full_path = os.path.join(self.base_path, path)
+        if not os.path.exists(full_path):
+            return []
+            
+        try:
+            # Return only directories
+            return [d for d in os.listdir(full_path) if os.path.isdir(os.path.join(full_path, d))]
+        except Exception:
+            return []
+
     def list_databases(self):
+        """
+        Lists all database files in archived instances
+        :return: List of database file paths
+        """
         archived_path = os.path.join(self.base_path, "archived")
         archived_instances = self.list_folders("archived")
         archived_databases = []
@@ -240,6 +292,11 @@ class FileSystemUtil:
         return archived_databases
 
     def list_checkpoints(self, full_path: bool):
+        """
+        Lists all checkpoint database files
+        :param full_path: If True, return full paths, otherwise just filenames
+        :return: List of checkpoint database files
+        """
         dir_path = os.path.join(self.base_path, "data")
         if full_path:
             checkpoints = [os.path.join(dir_path, f) for f in os.listdir(dir_path) if
