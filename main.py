@@ -1,10 +1,12 @@
 import os
 import secrets
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.middleware.cors import CORSMiddleware
 
 from routers import (
     manage_accounts,
@@ -16,20 +18,54 @@ from routers import (
     manage_market_data,
     manage_performance,
 )
+from utils.mqtt_exception_handler import setup_global_mqtt_exception_handler
 
+# Load environment variables early
 load_dotenv()
-security = HTTPBasic()
 
+# Environment variables
 username = os.getenv("USERNAME", "admin")
 password = os.getenv("PASSWORD", "admin")
-debug_mode = os.getenv("DEBUG_MODE", False)
+debug_mode = os.getenv("DEBUG_MODE", "False").lower() in ("true", "1", "t")
 
-app = FastAPI()
+# Security setup
+security = HTTPBasic()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager for the FastAPI application.
+    Handles startup and shutdown events.
+    """
+    # Startup logic
+    setup_global_mqtt_exception_handler()
+    yield
+    # Shutdown logic (add cleanup code here if needed)
+
+
+# Initialize FastAPI with metadata and lifespan
+app = FastAPI(
+    title="Hummingbot Backend API",
+    description="API for managing Hummingbot trading instances",
+    version="0.1.0",
+    lifespan=lifespan,
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Modify in production to specific origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def auth_user(
     credentials: Annotated[HTTPBasicCredentials, Depends(security)],
 ):
+    """Authenticate user using HTTP Basic Auth"""
     current_username_bytes = credentials.username.encode("utf8")
     correct_username_bytes = f"{username}".encode("utf8")
     is_correct_username = secrets.compare_digest(
@@ -46,8 +82,10 @@ def auth_user(
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Basic"},
         )
+    return credentials.username
 
 
+# Include all routers with authentication
 app.include_router(manage_docker.router, dependencies=[Depends(auth_user)])
 app.include_router(manage_broker_messages.router, dependencies=[Depends(auth_user)])
 app.include_router(manage_files.router, dependencies=[Depends(auth_user)])
