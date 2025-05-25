@@ -10,7 +10,7 @@ from fastapi import APIRouter
 
 from utils.file_system import FileSystemUtil
 
-router = APIRouter(tags=["Database Management"])
+router = APIRouter(tags=["Databases"])
 file_system = FileSystemUtil()
 
 

@@ -7,7 +7,7 @@ from starlette import status
 from services.accounts_service import AccountsService
 from utils.file_system import FileSystemUtil
 
-router = APIRouter(tags=["Manage Credentials"])
+router = APIRouter(tags=["Accounts"])
 file_system = FileSystemUtil(base_path="bots/credentials")
 accounts_service = AccountsService()
 

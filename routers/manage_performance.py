@@ -5,7 +5,7 @@ from hummingbot.strategy_v2.backtesting.backtesting_engine_base import Backtesti
 
 from utils.etl_databases import PerformanceDataSource
 
-router = APIRouter(tags=["Market Performance"])
+router = APIRouter(tags=["Performance"])
 
 
 @router.post("/get-performance-results")

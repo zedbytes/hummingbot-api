@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from hummingbot.data_feed.candles_feed.candles_factory import CandlesFactory
 from hummingbot.data_feed.candles_feed.data_types import CandlesConfig, HistoricalCandlesConfig
 
-router = APIRouter(tags=["Market Data"])
+router = APIRouter(tags=["Market"])
 candles_factory = CandlesFactory()
 
 

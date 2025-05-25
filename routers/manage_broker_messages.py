@@ -5,7 +5,7 @@ from models import ImportStrategyAction, StartBotAction, StopBotAction
 from services.bots_orchestrator import BotsManager
 
 # Initialize the scheduler
-router = APIRouter(tags=["Manage Broker Messages"])
+router = APIRouter(tags=["Broker"])
 bots_manager = BotsManager(broker_host=BROKER_HOST, broker_port=BROKER_PORT, broker_username=BROKER_USERNAME,
                            broker_password=BROKER_PASSWORD)
 

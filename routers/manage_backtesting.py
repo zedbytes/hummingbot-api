@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from config import CONTROLLERS_MODULE, CONTROLLERS_PATH
 
-router = APIRouter(tags=["Market Backtesting"])
+router = APIRouter(tags=["Backtesting"])
 candles_factory = CandlesFactory()
 backtesting_engine = BacktestingEngineBase()
 
