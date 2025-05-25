@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections import deque
 from typing import Optional
 
@@ -6,6 +7,8 @@ import docker
 from hbotrc import BotCommands
 from hbotrc.listener import BotListener
 from hbotrc.spec import TopicSpecs
+
+logger = logging.getLogger(__name__)
 
 
 class HummingbotPerformanceListener(BotListener):
@@ -20,6 +23,7 @@ class HummingbotPerformanceListener(BotListener):
         self._bot_error_logs = deque(maxlen=100)
         self._bot_general_logs = deque(maxlen=100)
         self.performance_report_sub = None
+        self._is_stopping = False
 
     def get_bot_performance(self):
         return self._bot_performance
@@ -46,8 +50,17 @@ class HummingbotPerformanceListener(BotListener):
             self._bot_general_logs.append(log)
 
     def stop(self):
-        super().stop()
-        self._bot_performance = {}
+        self._is_stopping = True
+        try:
+            super().stop()
+        except ConnectionError:
+            # Expected when bot disconnects
+            logger.debug(f"Bot {self._bot_id} disconnected as expected")
+        except Exception as e:
+            logger.error(f"Error stopping listener for bot {self._bot_id}: {e}")
+        finally:
+            self._bot_performance = {}
+            self._is_stopping = False
 
 
 class BotsManager:
@@ -66,6 +79,7 @@ class BotsManager:
             return "hummingbot" in container.name and "broker" not in container.name
         except Exception:
             return False
+
     async def get_active_containers(self):
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._sync_get_active_containers)
@@ -87,27 +101,38 @@ class BotsManager:
 
     async def update_active_bots(self, sleep_time=1):
         while True:
-            active_hbot_containers = await self.get_active_containers()
-            # Remove bots that are no longer active
-            for bot in list(self.active_bots):
-                if bot not in active_hbot_containers:
-                    del self.active_bots[bot]
+            try:
+                active_hbot_containers = await self.get_active_containers()
+                # Remove bots that are no longer active
+                for bot in list(self.active_bots):
+                    if bot not in active_hbot_containers:
+                        # Properly stop the listener before removing
+                        try:
+                            self.active_bots[bot]["broker_listener"].stop()
+                        except Exception as e:
+                            logger.warning(f"Error stopping listener for {bot}: {e}")
+                        del self.active_bots[bot]
 
-            # Add new bots or update existing ones
-            for bot in active_hbot_containers:
-                if bot not in self.active_bots:
-                    hbot_listener = HummingbotPerformanceListener(host=self.broker_host, port=self.broker_port,
-                                                                  username=self.broker_username,
-                                                                  password=self.broker_password,
-                                                                  bot_id=bot)
-                    hbot_listener.start()
-                    self.active_bots[bot] = {
-                        "bot_name": bot,
-                        "broker_client": BotCommands(host=self.broker_host, port=self.broker_port,
-                                                     username=self.broker_username, password=self.broker_password,
-                                                     bot_id=bot),
-                        "broker_listener": hbot_listener,
-                    }
+                # Add new bots or update existing ones
+                for bot in active_hbot_containers:
+                    if bot not in self.active_bots:
+                        try:
+                            hbot_listener = HummingbotPerformanceListener(host=self.broker_host, port=self.broker_port,
+                                                                          username=self.broker_username,
+                                                                          password=self.broker_password,
+                                                                          bot_id=bot)
+                            hbot_listener.start()
+                            self.active_bots[bot] = {
+                                "bot_name": bot,
+                                "broker_client": BotCommands(host=self.broker_host, port=self.broker_port,
+                                                             username=self.broker_username, password=self.broker_password,
+                                                             bot_id=bot),
+                                "broker_listener": hbot_listener,
+                            }
+                        except Exception as e:
+                            logger.error(f"Error creating listener for {bot}: {e}")
+            except Exception as e:
+                logger.error(f"Error in update_active_bots: {e}")
             await asyncio.sleep(sleep_time)
 
     # Interact with a specific bot
@@ -118,8 +143,17 @@ class BotsManager:
 
     def stop_bot(self, bot_name, **kwargs):
         if bot_name in self.active_bots:
-            self.active_bots[bot_name]["broker_listener"].stop()
-            return self.active_bots[bot_name]["broker_client"].stop(**kwargs)
+            # First stop the bot command
+            result = self.active_bots[bot_name]["broker_client"].stop(**kwargs)
+            
+            # Then stop the listener, catching any connection errors
+            try:
+                self.active_bots[bot_name]["broker_listener"].stop()
+            except Exception as e:
+                logger.warning(f"Error stopping listener for {bot_name}: {e}")
+                # Don't re-raise, as this is expected when bot disconnects
+            
+            return result
 
     def import_strategy_for_bot(self, bot_name, strategy, **kwargs):
         if bot_name in self.active_bots:
