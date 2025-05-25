@@ -87,10 +87,12 @@ def auth_user(
 
 # Include all routers with authentication
 app.include_router(manage_docker.router, dependencies=[Depends(auth_user)])
+app.include_router(manage_accounts.router, dependencies=[Depends(auth_user)])
 app.include_router(manage_broker_messages.router, dependencies=[Depends(auth_user)])
-app.include_router(manage_files.router, dependencies=[Depends(auth_user)])
+app.include_router(manage_files.configs_router, dependencies=[Depends(auth_user)])
+app.include_router(manage_files.controllers_router, dependencies=[Depends(auth_user)])
+app.include_router(manage_files.scripts_router, dependencies=[Depends(auth_user)])
 app.include_router(manage_market_data.router, dependencies=[Depends(auth_user)])
 app.include_router(manage_backtesting.router, dependencies=[Depends(auth_user)])
 app.include_router(manage_databases.router, dependencies=[Depends(auth_user)])
 app.include_router(manage_performance.router, dependencies=[Depends(auth_user)])
-app.include_router(manage_accounts.router, dependencies=[Depends(auth_user)])
