@@ -15,3 +15,4 @@ echo "CONFIG_PASSWORD=$CONFIG_PASSWORD" > .env
 echo "BOTS_PATH=$BOTS_PATH" >> .env
 echo "USERNAME=$USERNAME" >> .env
 echo "PASSWORD=$PASSWORD" >> .env
+echo "LOGFIRE_ENVIRONMENT=dev" >> .env
