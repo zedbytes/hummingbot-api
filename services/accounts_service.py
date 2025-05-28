@@ -25,6 +25,11 @@ class AccountsService:
     to initialize all the connectors that are connected to each account, keep track of the balances of each account and
     update the balances of each account.
     """
+    default_quotes = {
+        "hyperliquid": "USD",
+        "hyperliquid_perpetual": "USDC",
+        "xrpl": "RLUSD"
+    }
 
     def __init__(self,
                  update_account_state_interval_minutes: int = 5,
@@ -44,11 +49,12 @@ class AccountsService:
     def get_accounts_state(self):
         return self.accounts_state
 
-    def get_default_market(self, token: str):
+    def get_default_market(self, token: str, connector_name: str) -> str:
         if token.startswith("LD") and token != "LDO":
             # These tokens are staked in binance earn
             token = token[2:]
-        return f"{token}-{self.default_quote}"
+        quote = self.default_quotes.get(connector_name, self.default_quote)
+        return f"{token}-{quote}"
 
     def start_update_account_state_loop(self):
         """
@@ -203,14 +209,14 @@ class AccountsService:
                     balances = [{"token": key, "units": value} for key, value in connector.get_all_balances().items() if
                                 value != Decimal("0") and key not in BANNED_TOKENS]
                     unique_tokens = [balance["token"] for balance in balances]
-                    trading_pairs = [self.get_default_market(token) for token in unique_tokens if "USD" not in token]
+                    trading_pairs = [self.get_default_market(token, connector_name) for token in unique_tokens if "USD" not in token]
                     last_traded_prices = await self._safe_get_last_traded_prices(connector, trading_pairs)
                     for balance in balances:
                         token = balance["token"]
                         if "USD" in token:
                             price = Decimal("1")
                         else:
-                            market = self.get_default_market(balance["token"])
+                            market = self.get_default_market(balance["token"], connector_name)
                             price = Decimal(last_traded_prices.get(market, 0))
                         tokens_info.append({
                             "token": balance["token"],
@@ -225,9 +231,8 @@ class AccountsService:
                         f"Error updating balances for connector {connector_name} in account {account_name}: {e}")
                 self.accounts_state[account_name][connector_name] = tokens_info
 
-    async def _safe_get_last_traded_prices(self, connector, trading_pairs, timeout=5):
+    async def _safe_get_last_traded_prices(self, connector, trading_pairs, timeout=10):
         try:
-            # TODO: Fix OKX connector to return the markets in Hummingbot format.
             last_traded = await asyncio.wait_for(connector.get_last_traded_prices(trading_pairs=trading_pairs), timeout=timeout)
             return last_traded
         except asyncio.TimeoutError:
