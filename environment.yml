@@ -17,3 +17,6 @@ dependencies:
       - flake8
       - isort
       - pre-commit
+      - logfire
+      - logfire[fastapi]
+      - logfire[system-metrics]
