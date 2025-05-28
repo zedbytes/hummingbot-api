@@ -3,11 +3,13 @@ import secrets
 from contextlib import asynccontextmanager
 from typing import Annotated
 
+import logfire
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.middleware.cors import CORSMiddleware
 
+from config import LOGFIRE_ENVIRONMENT
 from routers import (
     manage_accounts,
     manage_backtesting,
@@ -61,6 +63,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+logfire.configure(send_to_logfire="if-token-present", environment=LOGFIRE_ENVIRONMENT, service_name="backend-api")
+logfire.instrument_fastapi(app)
 
 def auth_user(
     credentials: Annotated[HTTPBasicCredentials, Depends(security)],
