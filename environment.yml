@@ -13,10 +13,10 @@ dependencies:
   - pip
   - pip:
       - hummingbot
-      - git+https://github.com/hummingbot/hbot-remote-client-py.git
       - flake8
       - isort
       - pre-commit
       - logfire
       - logfire[fastapi]
       - logfire[system-metrics]
+      - aiomqtt>=2.0.0
