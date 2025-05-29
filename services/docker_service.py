@@ -12,7 +12,7 @@ from utils.file_system import FileSystemUtil
 file_system = FileSystemUtil()
 
 
-class DockerManager:
+class DockerService:
     def __init__(self):
         self.SOURCE_PATH = os.getcwd()
         try:
