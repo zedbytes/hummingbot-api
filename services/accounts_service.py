@@ -6,15 +6,11 @@ from decimal import Decimal
 from typing import Optional
 
 from fastapi import HTTPException
-from hummingbot.client.config.client_config_map import ClientConfigMap
 from hummingbot.client.config.config_crypt import ETHKeyFileSecretManger
-from hummingbot.client.config.config_helpers import ClientConfigAdapter, ReadOnlyClientConfigAdapter, get_connector_class
-from hummingbot.client.settings import AllConnectorSettings
 
 from config import BANNED_TOKENS, CONFIG_PASSWORD
+from services.connector_manager import ConnectorManager
 from utils.file_system import FileSystemUtil
-from utils.models import BackendAPIConfigAdapter
-from utils.security import BackendAPISecurity
 
 file_system = FileSystemUtil()
 
@@ -37,6 +33,7 @@ class AccountsService:
                  account_history_file: str = "account_state_history.json"):
         # TODO: Add database to store the balances of each account each time it is updated.
         self.secrets_manager = ETHKeyFileSecretManger(CONFIG_PASSWORD)
+        self.connector_manager = ConnectorManager(self.secrets_manager)
         self.accounts = {}
         self.accounts_state = {}
         self.account_state_update_event = asyncio.Event()
@@ -140,7 +137,7 @@ class AccountsService:
             for connector_name in self.list_credentials(account_name):
                 try:
                     connector_name = connector_name.split(".")[0]
-                    connector = self.get_connector(account_name, connector_name)
+                    connector = self.connector_manager.get_connector(account_name, connector_name)
                     self.accounts[account_name][connector_name] = connector
                 except Exception as e:
                     logging.error(f"Error initializing connector {connector_name}: {e}")
@@ -168,7 +165,7 @@ class AccountsService:
         if account_name not in self.accounts:
             self.accounts[account_name] = {}
         try:
-            connector = self.get_connector(account_name, connector_name)
+            connector = self.connector_manager.get_connector(account_name, connector_name)
             self.accounts[account_name][connector_name] = connector
         except Exception as e:
             logging.error(f"Error initializing connector {connector_name}: {e}")
@@ -242,49 +239,20 @@ class AccountsService:
             logging.error(f"Error getting last traded prices in connector {connector} for trading pairs {trading_pairs}: {e}")
             return {pair: Decimal("0") for pair in trading_pairs}
 
-    @staticmethod
-    def get_connector_config_map(connector_name: str):
+    def get_connector_config_map(self, connector_name: str):
         """
         Get the connector config map for the specified connector.
         :param connector_name: The name of the connector.
         :return: The connector config map.
         """
-        connector_config = BackendAPIConfigAdapter(AllConnectorSettings.get_connector_config_keys(connector_name))
-        return [key for key in connector_config.hb_config.__fields__.keys() if key != "connector"]
+        return self.connector_manager.get_connector_config_map(connector_name)
 
     async def add_connector_keys(self, account_name: str, connector_name: str, keys: dict):
-        BackendAPISecurity.login_account(account_name=account_name, secrets_manager=self.secrets_manager)
-        connector_config = BackendAPIConfigAdapter(AllConnectorSettings.get_connector_config_keys(connector_name))
-        for key, value in keys.items():
-            setattr(connector_config, key, value)
-        BackendAPISecurity.update_connector_keys(account_name, connector_config)
-        new_connector = self.get_connector(account_name, connector_name)
-        await new_connector._update_balances()
+        new_connector = await self.connector_manager.update_connector_keys(account_name, connector_name, keys)
         self.accounts[account_name][connector_name] = new_connector
         await self.update_account_state()
         await self.dump_account_state()
 
-    def get_connector(self, account_name: str, connector_name: str):
-        """
-        Get the connector object for the specified account and connector.
-        :param account_name: The name of the account.
-        :param connector_name: The name of the connector.
-        :return: The connector object.
-        """
-        BackendAPISecurity.login_account(account_name=account_name, secrets_manager=self.secrets_manager)
-        client_config_map = ClientConfigAdapter(ClientConfigMap())
-        conn_setting = AllConnectorSettings.get_connector_settings()[connector_name]
-        keys = BackendAPISecurity.api_keys(connector_name)
-        read_only_config = ReadOnlyClientConfigAdapter.lock_config(client_config_map)
-        init_params = conn_setting.conn_init_parameters(
-            trading_pairs=[],
-            trading_required=True,
-            api_keys=keys,
-            client_config_map=read_only_config,
-        )
-        connector_class = get_connector_class(connector_name)
-        connector = connector_class(**init_params)
-        return connector
 
     @staticmethod
     def list_accounts():
@@ -319,6 +287,8 @@ class AccountsService:
                 self.accounts[account_name].pop(connector_name)
             if connector_name in self.accounts_state[account_name]:
                 self.accounts_state[account_name].pop(connector_name)
+            # Clear the connector from cache
+            self.connector_manager.clear_cache(account_name, connector_name)
 
     def add_account(self, account_name: str):
         """
@@ -345,3 +315,5 @@ class AccountsService:
         file_system.delete_folder('credentials', account_name)
         self.accounts.pop(account_name)
         self.accounts_state.pop(account_name)
+        # Clear all connectors for this account from cache
+        self.connector_manager.clear_cache(account_name)
