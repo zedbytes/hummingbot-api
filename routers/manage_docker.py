@@ -4,11 +4,11 @@ import os
 from fastapi import APIRouter, HTTPException
 
 from models import HummingbotInstanceConfig, ImageName
-from services.bot_archiver import BotArchiver
-from services.docker_service import DockerManager
+from utils.bot_archiver import BotArchiver
+from services.docker_service import DockerService
 
 router = APIRouter(tags=["Docker"])
-docker_manager = DockerManager()
+docker_manager = DockerService()
 bot_archiver = BotArchiver(os.environ.get("AWS_API_KEY"), os.environ.get("AWS_SECRET_KEY"),
                            os.environ.get("S3_DEFAULT_BUCKET_NAME"))
 
