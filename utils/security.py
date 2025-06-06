@@ -12,7 +12,7 @@ from hummingbot.client.config.security import Security
 
 from config import PASSWORD_VERIFICATION_PATH
 from utils.file_system import FileSystemUtil
-from utils.models import BackendAPIConfigAdapter
+from utils.backend_api_config_adapter import BackendAPIConfigAdapter
 
 
 class BackendAPISecurity(Security):
