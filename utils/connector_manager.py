@@ -6,7 +6,7 @@ from hummingbot.client.config.config_crypt import ETHKeyFileSecretManger
 from hummingbot.client.config.config_helpers import ClientConfigAdapter, ReadOnlyClientConfigAdapter, get_connector_class
 from hummingbot.client.settings import AllConnectorSettings
 
-from utils.models import BackendAPIConfigAdapter
+from utils.backend_api_config_adapter import BackendAPIConfigAdapter
 from utils.security import BackendAPISecurity
 
 
