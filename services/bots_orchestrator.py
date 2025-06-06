@@ -1,80 +1,42 @@
 import asyncio
 import logging
-from collections import deque
 from typing import Optional
 
 import docker
-from hbotrc import BotCommands
-from hbotrc.listener import BotListener
-from hbotrc.spec import TopicSpecs
+
+from utils.mqtt_manager import MQTTManager
 
 logger = logging.getLogger(__name__)
 
 
-class HummingbotPerformanceListener(BotListener):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        topic_prefix = TopicSpecs.PREFIX.format(
-            namespace=self._ns,
-            instance_id=self._bot_id
-        )
-        self._performance_topic = f'{topic_prefix}/performance'
-        self._bot_performance = {}
-        self._bot_error_logs = deque(maxlen=100)
-        self._bot_general_logs = deque(maxlen=100)
-        self.performance_report_sub = None
-        self._is_stopping = False
-
-    def get_bot_performance(self):
-        return self._bot_performance
-
-    def get_bot_error_logs(self):
-        return list(self._bot_error_logs)
-
-    def get_bot_general_logs(self):
-        return list(self._bot_general_logs)
-
-    def _init_endpoints(self):
-        super()._init_endpoints()
-        self.performance_report_sub = self.create_subscriber(topic=self._performance_topic,
-                                                             on_message=self._update_bot_performance)
-
-    def _update_bot_performance(self, msg):
-        for controller_id, performance_report in msg.items():
-            self._bot_performance[controller_id] = performance_report
-
-    def _on_log(self, log):
-        if log.level_name == "ERROR":
-            self._bot_error_logs.append(log)
-        else:
-            self._bot_general_logs.append(log)
-
-    def stop(self):
-        self._is_stopping = True
-        try:
-            super().stop()
-        except ConnectionError:
-            # Expected when bot disconnects
-            logger.debug(f"Bot {self._bot_id} disconnected as expected")
-        except Exception as e:
-            logger.error(f"Error stopping listener for bot {self._bot_id}: {e}")
-        finally:
-            self._bot_performance = {}
-            self._is_stopping = False
+# HummingbotPerformanceListener class is no longer needed
+# All functionality is now handled by MQTTManager
 
 
-class BotsManager:
+class BotsOrchestrator:
+    """Orchestrates Hummingbot instances using Docker and MQTT communication."""
+
     def __init__(self, broker_host, broker_port, broker_username, broker_password):
         self.broker_host = broker_host
         self.broker_port = broker_port
         self.broker_username = broker_username
         self.broker_password = broker_password
+
+        # Initialize Docker client
         self.docker_client = docker.from_env()
+
+        # Initialize MQTT manager
+        self.mqtt_manager = MQTTManager(host=broker_host, port=broker_port, username=broker_username, password=broker_password)
+
+        # Active bots tracking
         self.active_bots = {}
         self._update_bots_task: Optional[asyncio.Task] = None
 
+        # MQTT manager will be started asynchronously later
+
     @staticmethod
     def hummingbot_containers_fiter(container):
+        """Filter for Hummingbot containers."""
         try:
             return "hummingbot" in container.name and "broker" not in container.name
         except Exception:
@@ -88,84 +50,168 @@ class BotsManager:
         return [
             container.name
             for container in self.docker_client.containers.list()
-            if container.status == 'running' and self.hummingbot_containers_fiter(container)
+            if container.status == "running" and self.hummingbot_containers_fiter(container)
         ]
 
     def start_update_active_bots_loop(self):
-        self._update_bots_task = asyncio.create_task(self.update_active_bots())
+        """Start the loop that monitors active bots."""
+        # Start MQTT manager and update loop in async context
+        self._update_bots_task = asyncio.create_task(self._start_async())
+
+    async def _start_async(self):
+        """Start MQTT manager and update loop asynchronously."""
+        logger.info("Starting MQTT manager...")
+        await self.mqtt_manager.start()
+
+        # Then start the update loop
+        await self.update_active_bots()
 
     def stop_update_active_bots_loop(self):
+        """Stop the active bots monitoring loop."""
         if self._update_bots_task:
             self._update_bots_task.cancel()
         self._update_bots_task = None
 
+        # Stop MQTT manager asynchronously
+        asyncio.create_task(self.mqtt_manager.stop())
+
     async def update_active_bots(self, sleep_time=1):
+        """Monitor and update active bots list using both Docker and MQTT discovery."""
         while True:
             try:
-                active_hbot_containers = await self.get_active_containers()
-                # Remove bots that are no longer active
-                for bot in list(self.active_bots):
-                    if bot not in active_hbot_containers:
-                        # Properly stop the listener before removing
-                        try:
-                            self.active_bots[bot]["broker_listener"].stop()
-                        except Exception as e:
-                            logger.warning(f"Error stopping listener for {bot}: {e}")
-                        del self.active_bots[bot]
+                # Get bots from Docker containers
+                docker_bots = await self.get_active_containers()
 
-                # Add new bots or update existing ones
-                for bot in active_hbot_containers:
-                    if bot not in self.active_bots:
-                        try:
-                            hbot_listener = HummingbotPerformanceListener(host=self.broker_host, port=self.broker_port,
-                                                                          username=self.broker_username,
-                                                                          password=self.broker_password,
-                                                                          bot_id=bot)
-                            hbot_listener.start()
-                            self.active_bots[bot] = {
-                                "bot_name": bot,
-                                "broker_client": BotCommands(host=self.broker_host, port=self.broker_port,
-                                                             username=self.broker_username, password=self.broker_password,
-                                                             bot_id=bot),
-                                "broker_listener": hbot_listener,
-                            }
-                        except Exception as e:
-                            logger.error(f"Error creating listener for {bot}: {e}")
+                # Get bots from MQTT messages (auto-discovered)
+                mqtt_bots = self.mqtt_manager.get_discovered_bots(timeout_seconds=300)  # 5 minute timeout
+
+                # Combine both sources
+                all_active_bots = set(docker_bots + mqtt_bots)
+
+                # Remove bots that are no longer active
+                for bot_name in list(self.active_bots):
+                    if bot_name not in all_active_bots:
+                        self.mqtt_manager.clear_bot_data(bot_name)
+                        del self.active_bots[bot_name]
+
+                # Add new bots
+                for bot_name in all_active_bots:
+                    if bot_name not in self.active_bots:
+                        self.active_bots[bot_name] = {
+                            "bot_name": bot_name,
+                            "status": "connected",
+                            "source": "docker" if bot_name in docker_bots else "mqtt",
+                        }
+                        # Subscribe to this specific bot's topics
+                        await self.mqtt_manager.subscribe_to_bot(bot_name)
+
             except Exception as e:
-                logger.error(f"Error in update_active_bots: {e}")
+                logger.error(f"Error in update_active_bots: {e}", exc_info=True)
+
             await asyncio.sleep(sleep_time)
 
     # Interact with a specific bot
-    def start_bot(self, bot_name, **kwargs):
-        if bot_name in self.active_bots:
-            self.active_bots[bot_name]["broker_listener"].start()
-            return self.active_bots[bot_name]["broker_client"].start(**kwargs)
+    async def start_bot(self, bot_name, **kwargs):
+        """
+        Start a bot with optional script.
+        Maintains backward compatibility with kwargs.
+        """
+        if bot_name not in self.active_bots:
+            logger.warning(f"Bot {bot_name} not found in active bots")
+            return {"success": False, "message": f"Bot {bot_name} not found"}
 
-    def stop_bot(self, bot_name, **kwargs):
-        if bot_name in self.active_bots:
-            # First stop the bot command
-            result = self.active_bots[bot_name]["broker_client"].stop(**kwargs)
-            
-            # Then stop the listener, catching any connection errors
-            try:
-                self.active_bots[bot_name]["broker_listener"].stop()
-            except Exception as e:
-                logger.warning(f"Error stopping listener for {bot_name}: {e}")
-                # Don't re-raise, as this is expected when bot disconnects
-            
-            return result
+        # Create StartCommandMessage.Request format
+        data = {
+            "log_level": kwargs.get("log_level"),
+            "script": kwargs.get("script"),
+            "conf": kwargs.get("conf"),
+            "is_quickstart": kwargs.get("is_quickstart", False),
+            "async_backend": kwargs.get("async_backend", True),
+        }
 
-    def import_strategy_for_bot(self, bot_name, strategy, **kwargs):
-        if bot_name in self.active_bots:
-            return self.active_bots[bot_name]["broker_client"].import_strategy(strategy, **kwargs)
+        success = await self.mqtt_manager.publish_command(bot_name, "start", data)
+        return {"success": success}
 
-    def configure_bot(self, bot_name, params, **kwargs):
-        if bot_name in self.active_bots:
-            return self.active_bots[bot_name]["broker_client"].config(params, **kwargs)
+    async def stop_bot(self, bot_name, **kwargs):
+        """
+        Stop a bot.
+        Maintains backward compatibility with kwargs.
+        """
+        if bot_name not in self.active_bots:
+            logger.warning(f"Bot {bot_name} not found in active bots")
+            return {"success": False, "message": f"Bot {bot_name} not found"}
 
-    def get_bot_history(self, bot_name, **kwargs):
-        if bot_name in self.active_bots:
-            return self.active_bots[bot_name]["broker_client"].history(**kwargs)
+        # Create StopCommandMessage.Request format
+        data = {
+            "skip_order_cancellation": kwargs.get("skip_order_cancellation", False),
+            "async_backend": kwargs.get("async_backend", True),
+        }
+
+        success = await self.mqtt_manager.publish_command(bot_name, "stop", data)
+
+        # Clear performance data after stop command to immediately reflect stopped status
+        if success:
+            self.mqtt_manager.clear_bot_performance(bot_name)
+
+        return {"success": success}
+
+    async def import_strategy_for_bot(self, bot_name, strategy, **kwargs):
+        """
+        Import a strategy configuration for a bot.
+        Maintains backward compatibility.
+        """
+        if bot_name not in self.active_bots:
+            logger.warning(f"Bot {bot_name} not found in active bots")
+            return {"success": False, "message": f"Bot {bot_name} not found"}
+
+        # Create ImportCommandMessage.Request format
+        data = {"strategy": strategy}
+        success = await self.mqtt_manager.publish_command(bot_name, "import_strategy", data)
+        return {"success": success}
+
+    async def configure_bot(self, bot_name, params, **kwargs):
+        """
+        Configure bot parameters.
+        Maintains backward compatibility.
+        """
+        if bot_name not in self.active_bots:
+            logger.warning(f"Bot {bot_name} not found in active bots")
+            return {"success": False, "message": f"Bot {bot_name} not found"}
+
+        # Create ConfigCommandMessage.Request format
+        data = {"params": params}
+        success = await self.mqtt_manager.publish_command(bot_name, "config", data)
+        return {"success": success}
+
+    async def get_bot_history(self, bot_name, **kwargs):
+        """
+        Request bot trading history and wait for the response.
+        Maintains backward compatibility.
+        """
+        if bot_name not in self.active_bots:
+            logger.warning(f"Bot {bot_name} not found in active bots")
+            return {"success": False, "message": f"Bot {bot_name} not found"}
+
+        # Create HistoryCommandMessage.Request format
+        data = {
+            "days": kwargs.get("days", 0),
+            "verbose": kwargs.get("verbose", False),
+            "precision": kwargs.get("precision"),
+            "async_backend": kwargs.get("async_backend", False),
+        }
+
+        # Use the new RPC method to wait for response
+        timeout = kwargs.get("timeout", 30.0)  # Default 30 second timeout
+        response = await self.mqtt_manager.publish_command_and_wait(bot_name, "history", data, timeout=timeout)
+
+        if response is None:
+            return {
+                "success": False,
+                "message": f"No response received from {bot_name} within {timeout} seconds",
+                "timeout": True,
+            }
+
+        return {"success": True, "data": response}
 
     @staticmethod
     def determine_controller_performance(controllers_performance):
@@ -174,10 +220,7 @@ class BotsManager:
             try:
                 # Check if all the metrics are numeric
                 _ = sum(metric for key, metric in performance.items() if key not in ("positions_summary", "close_type_counts"))
-                cleaned_performance[controller] = {
-                    "status": "running",
-                    "performance": performance
-                }
+                cleaned_performance[controller] = {"status": "running", "performance": performance}
             except Exception as e:
                 cleaned_performance[controller] = {
                     "status": "error",
@@ -186,28 +229,46 @@ class BotsManager:
         return cleaned_performance
 
     def get_all_bots_status(self):
+        """Get status information for all active bots."""
         all_bots_status = {}
         for bot in self.active_bots:
-            all_bots_status[bot] = self.get_bot_status(bot)
+            status = self.get_bot_status(bot)
+            status["source"] = self.active_bots[bot].get("source", "unknown")
+            all_bots_status[bot] = status
         return all_bots_status
 
     def get_bot_status(self, bot_name):
-        if bot_name in self.active_bots:
-            try:
-                broker_listener = self.active_bots[bot_name]["broker_listener"]
-                controllers_performance = broker_listener.get_bot_performance()
-                performance = self.determine_controller_performance(controllers_performance)
-                error_logs = broker_listener.get_bot_error_logs()
-                general_logs = broker_listener.get_bot_general_logs()
-                status = "running" if len(performance) > 0 else "stopped"
-                return {
-                    "status": status,
-                    "performance": performance,
-                    "error_logs": error_logs,
-                    "general_logs": general_logs
-                }
-            except Exception as e:
-                return {
-                    "status": "error",
-                    "error": str(e)
-                }
+        """
+        Get status information for a specific bot.
+        """
+        if bot_name not in self.active_bots:
+            return {"status": "not_found", "error": f"Bot {bot_name} not found"}
+
+        try:
+            # Get data from MQTT manager
+            controllers_performance = self.mqtt_manager.get_bot_performance(bot_name)
+            performance = self.determine_controller_performance(controllers_performance)
+            error_logs = self.mqtt_manager.get_bot_error_logs(bot_name)
+            general_logs = self.mqtt_manager.get_bot_logs(bot_name)
+
+            # Check if bot has sent recent messages (within last 30 seconds)
+            discovered_bots = self.mqtt_manager.get_discovered_bots(timeout_seconds=30)
+            recently_active = bot_name in discovered_bots
+
+            # Determine status based on performance data and recent activity
+            if len(performance) > 0 and recently_active:
+                status = "running"
+            elif len(performance) > 0 and not recently_active:
+                status = "idle"  # Has performance data but no recent activity
+            else:
+                status = "stopped"
+
+            return {
+                "status": status,
+                "performance": performance,
+                "error_logs": error_logs,
+                "general_logs": general_logs,
+                "recently_active": recently_active,
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
