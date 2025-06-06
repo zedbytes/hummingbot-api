@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from hummingbot.client.config.config_crypt import ETHKeyFileSecretManger
 
 from config import BANNED_TOKENS, CONFIG_PASSWORD
-from services.connector_manager import ConnectorManager
+from utils.connector_manager import ConnectorManager
 from utils.file_system import FileSystemUtil
 
 file_system = FileSystemUtil()
@@ -24,7 +24,7 @@ class AccountsService:
     default_quotes = {
         "hyperliquid": "USD",
         "hyperliquid_perpetual": "USDC",
-        "xrpl": "RLUSD"
+        "xrpl": "RLUSD",
     }
 
     def __init__(self,
