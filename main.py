@@ -20,7 +20,18 @@ from routers import (
     manage_market_data,
     manage_performance,
 )
-from utils.mqtt_exception_handler import setup_global_mqtt_exception_handler
+
+# Configure logging
+import logging
+
+# Set up logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+# Enable debug logging for MQTT manager
+logging.getLogger('services.mqtt_manager').setLevel(logging.DEBUG)
 
 # Load environment variables early
 load_dotenv()
@@ -41,7 +52,6 @@ async def lifespan(app: FastAPI):
     Handles startup and shutdown events.
     """
     # Startup logic
-    setup_global_mqtt_exception_handler()
     yield
     # Shutdown logic (add cleanup code here if needed)
 
@@ -93,9 +103,7 @@ def auth_user(
 app.include_router(manage_docker.router, dependencies=[Depends(auth_user)])
 app.include_router(manage_accounts.router, dependencies=[Depends(auth_user)])
 app.include_router(manage_broker_messages.router, dependencies=[Depends(auth_user)])
-app.include_router(manage_files.configs_router, dependencies=[Depends(auth_user)])
-app.include_router(manage_files.controllers_router, dependencies=[Depends(auth_user)])
-app.include_router(manage_files.scripts_router, dependencies=[Depends(auth_user)])
+app.include_router(manage_files.router, dependencies=[Depends(auth_user)])
 app.include_router(manage_market_data.router, dependencies=[Depends(auth_user)])
 app.include_router(manage_backtesting.router, dependencies=[Depends(auth_user)])
 app.include_router(manage_databases.router, dependencies=[Depends(auth_user)])
