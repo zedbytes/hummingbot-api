@@ -9,11 +9,15 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.middleware.cors import CORSMiddleware
 
-from config import LOGFIRE_ENVIRONMENT
+from config import LOGFIRE_ENVIRONMENT, BROKER_HOST, BROKER_PASSWORD, BROKER_PORT, BROKER_USERNAME
+from services.bots_orchestrator import BotsOrchestrator
+from services.accounts_service import AccountsService
+from services.docker_service import DockerService
+from utils.bot_archiver import BotArchiver
 from routers import (
     manage_accounts,
     manage_backtesting,
-    manage_broker_messages,
+    manage_bot_orchestration,
     manage_databases,
     manage_docker,
     manage_files,
@@ -51,9 +55,37 @@ async def lifespan(app: FastAPI):
     Lifespan context manager for the FastAPI application.
     Handles startup and shutdown events.
     """
-    # Startup logic
+    # Initialize services
+    bots_orchestrator = BotsOrchestrator(
+        broker_host=BROKER_HOST,
+        broker_port=BROKER_PORT,
+        broker_username=BROKER_USERNAME,
+        broker_password=BROKER_PASSWORD
+    )
+    
+    accounts_service = AccountsService()
+    docker_service = DockerService()
+    bot_archiver = BotArchiver(
+        os.environ.get("AWS_API_KEY"),
+        os.environ.get("AWS_SECRET_KEY"),
+        os.environ.get("S3_DEFAULT_BUCKET_NAME")
+    )
+    
+    # Store services in app state
+    app.state.bots_orchestrator = bots_orchestrator
+    app.state.accounts_service = accounts_service
+    app.state.docker_service = docker_service
+    app.state.bot_archiver = bot_archiver
+    
+    # Start services
+    bots_orchestrator.start_update_active_bots_loop()
+    accounts_service.start_update_account_state_loop()
+    
     yield
-    # Shutdown logic (add cleanup code here if needed)
+    
+    # Shutdown services
+    bots_orchestrator.stop_update_active_bots_loop()
+    accounts_service.stop_update_account_state_loop()
 
 
 # Initialize FastAPI with metadata and lifespan
@@ -98,13 +130,21 @@ def auth_user(
         )
     return credentials.username
 
-
 # Include all routers with authentication
 app.include_router(manage_docker.router, dependencies=[Depends(auth_user)])
 app.include_router(manage_accounts.router, dependencies=[Depends(auth_user)])
-app.include_router(manage_broker_messages.router, dependencies=[Depends(auth_user)])
+app.include_router(manage_bot_orchestration.router, dependencies=[Depends(auth_user)])
 app.include_router(manage_files.router, dependencies=[Depends(auth_user)])
 app.include_router(manage_market_data.router, dependencies=[Depends(auth_user)])
 app.include_router(manage_backtesting.router, dependencies=[Depends(auth_user)])
 app.include_router(manage_databases.router, dependencies=[Depends(auth_user)])
 app.include_router(manage_performance.router, dependencies=[Depends(auth_user)])
+
+@app.get("/")
+async def root():
+    """API root endpoint returning basic information."""
+    return {
+        "name": "Backend API",
+        "version": "0.2.0",
+        "status": "running",
+    }
