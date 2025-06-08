@@ -97,11 +97,7 @@ class DockerService:
 
         # Copy credentials to instance directory
         source_credentials_dir = os.path.join("bots", 'credentials', config.credentials_profile)
-        script_config_dir = os.path.join("bots", 'conf', 'scripts')
-        controllers_config_dir = os.path.join("bots", 'conf', 'controllers')
         destination_credentials_dir = os.path.join(instance_dir, 'conf')
-        destination_scripts_config_dir = os.path.join(instance_dir, 'conf', 'scripts')
-        destination_controllers_config_dir = os.path.join(instance_dir, 'conf', 'controllers')
 
         # Remove the destination directory if it already exists
         if os.path.exists(destination_credentials_dir):
@@ -109,8 +105,46 @@ class DockerService:
 
         # Copy the entire contents of source_credentials_dir to destination_credentials_dir     
         shutil.copytree(source_credentials_dir, destination_credentials_dir)
-        shutil.copytree(script_config_dir, destination_scripts_config_dir)
-        shutil.copytree(controllers_config_dir, destination_controllers_config_dir)
+        
+        # Copy specific script config and referenced controllers if provided
+        if config.script_config:
+            script_config_dir = os.path.join("bots", 'conf', 'scripts')
+            controllers_config_dir = os.path.join("bots", 'conf', 'controllers')
+            destination_scripts_config_dir = os.path.join(instance_dir, 'conf', 'scripts')
+            destination_controllers_config_dir = os.path.join(instance_dir, 'conf', 'controllers')
+            
+            os.makedirs(destination_scripts_config_dir, exist_ok=True)
+            
+            # Copy the specific script config file
+            source_script_config_file = os.path.join(script_config_dir, config.script_config)
+            destination_script_config_file = os.path.join(destination_scripts_config_dir, config.script_config)
+            
+            if os.path.exists(source_script_config_file):
+                shutil.copy2(source_script_config_file, destination_script_config_file)
+                
+                # Load the script config to find referenced controllers
+                try:
+                    script_config_content = FileSystemUtil.read_yaml_file(source_script_config_file)
+                    controllers_list = script_config_content.get('controllers_config', [])
+                    
+                    # If there are controllers referenced, copy them
+                    if controllers_list:
+                        os.makedirs(destination_controllers_config_dir, exist_ok=True)
+                        
+                        for controller_file in controllers_list:
+                            source_controller_file = os.path.join(controllers_config_dir, controller_file)
+                            destination_controller_file = os.path.join(destination_controllers_config_dir, controller_file)
+                            
+                            if os.path.exists(source_controller_file):
+                                shutil.copy2(source_controller_file, destination_controller_file)
+                                logging.info(f"Copied controller config: {controller_file}")
+                            else:
+                                logging.warning(f"Controller config file {controller_file} not found in {controllers_config_dir}")
+                                
+                except Exception as e:
+                    logging.error(f"Error reading script config file {config.script_config}: {e}")
+            else:
+                logging.warning(f"Script config file {config.script_config} not found in {script_config_dir}")
         conf_file_path = f"{instance_dir}/conf/conf_client.yml"
         client_config = FileSystemUtil.read_yaml_file(conf_file_path)
         client_config['instance_id'] = instance_name
