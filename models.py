@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 from pydantic import BaseModel
 
@@ -51,3 +51,12 @@ class ConfigureBotAction(BotAction):
 
 class ShortcutAction(BotAction):
     params: list
+
+
+class V2ControllerDeployment(BaseModel):
+    instance_name: str
+    credentials_profile: str
+    controllers_config: List[str]  # List of controller config files to use
+    max_global_drawdown: Optional[float] = None
+    max_controller_drawdown: Optional[float] = None
+    image: str = "hummingbot/hummingbot:latest"
