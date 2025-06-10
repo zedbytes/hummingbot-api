@@ -15,14 +15,14 @@ from services.accounts_service import AccountsService
 from services.docker_service import DockerService
 from utils.bot_archiver import BotArchiver
 from routers import (
-    manage_accounts,
-    manage_backtesting,
-    manage_bot_orchestration,
-    manage_databases,
-    manage_docker,
-    manage_files,
-    manage_market_data,
-    manage_performance,
+    accounts,
+    backtesting,
+    bot_orchestration,
+    databases,
+    docker,
+    files,
+    market_data,
+    performance,
 )
 
 # Configure logging
@@ -71,6 +71,9 @@ async def lifespan(app: FastAPI):
         os.environ.get("S3_DEFAULT_BUCKET_NAME")
     )
     
+    # Initialize database
+    await accounts_service.ensure_db_initialized()
+    
     # Store services in app state
     app.state.bots_orchestrator = bots_orchestrator
     app.state.accounts_service = accounts_service
@@ -86,6 +89,9 @@ async def lifespan(app: FastAPI):
     # Shutdown services
     bots_orchestrator.stop_update_active_bots_loop()
     accounts_service.stop_update_account_state_loop()
+    
+    # Close database connections
+    await accounts_service.db_manager.close()
 
 
 # Initialize FastAPI with metadata and lifespan
