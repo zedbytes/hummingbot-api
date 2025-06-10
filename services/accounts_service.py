@@ -3,12 +3,13 @@ import json
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Dict, List, Optional
 
 from fastapi import HTTPException
 from hummingbot.client.config.config_crypt import ETHKeyFileSecretManger
 
-from config import BANNED_TOKENS, CONFIG_PASSWORD
+from config import BANNED_TOKENS, CONFIG_PASSWORD, DATABASE_URL
+from database import AsyncDatabaseManager, AccountRepository
 from utils.connector_manager import ConnectorManager
 from utils.file_system import FileSystemUtil
 
@@ -31,7 +32,6 @@ class AccountsService:
                  update_account_state_interval_minutes: int = 5,
                  default_quote: str = "USDT",
                  account_history_file: str = "account_state_history.json"):
-        # TODO: Add database to store the balances of each account each time it is updated.
         self.secrets_manager = ETHKeyFileSecretManger(CONFIG_PASSWORD)
         self.connector_manager = ConnectorManager(self.secrets_manager)
         self.accounts = {}
@@ -42,7 +42,17 @@ class AccountsService:
         self.default_quote = default_quote
         self.history_file = account_history_file
         self._update_account_state_task: Optional[asyncio.Task] = None
+        
+        # Database setup
+        self.db_manager = AsyncDatabaseManager(DATABASE_URL)
+        self._db_initialized = False
 
+    async def ensure_db_initialized(self):
+        """Ensure database is initialized before using it."""
+        if not self._db_initialized:
+            await self.db_manager.create_tables()
+            self._db_initialized = True
+    
     def get_accounts_state(self):
         return self.accounts_state
 
@@ -88,30 +98,65 @@ class AccountsService:
 
     async def dump_account_state(self):
         """
-        Dump the current account state to a JSON file. Create it if the file not exists.
+        Save the current account state to the database.
         :return:
         """
-        timestamp = datetime.now().isoformat()
-        state_to_dump = {"timestamp": timestamp, "state": self.accounts_state}
-        if not file_system.path_exists(path=f"data/{self.history_file}"):
-            file_system.add_file(directory="data", file_name=self.history_file, content=json.dumps(state_to_dump) + "\n")
-        else:
-            file_system.append_to_file(directory="data", file_name=self.history_file, content=json.dumps(state_to_dump) + "\n")
-
-    def load_account_state_history(self):
-        """
-        Load the account state history from the JSON file.
-        :return: List of account states with timestamps.
-        """
-        history = []
+        await self.ensure_db_initialized()
+        
         try:
-            with open("bots/data/" + self.history_file, "r") as file:
-                for line in file:
-                    if line.strip():  # Check if the line is not empty
-                        history.append(json.loads(line))
-        except FileNotFoundError:
-            logging.warning("No account state history file found.")
-        return history
+            async with self.db_manager.get_session_context() as session:
+                repository = AccountRepository(session)
+                
+                # Save each account-connector combination
+                for account_name, connectors in self.accounts_state.items():
+                    for connector_name, tokens_info in connectors.items():
+                        if tokens_info:  # Only save if there's token data
+                            await repository.save_account_state(account_name, connector_name, tokens_info)
+                            
+        except Exception as e:
+            logging.error(f"Error saving account state to database: {e}")
+            # Fallback to JSON file
+            timestamp = datetime.now().isoformat()
+            state_to_dump = {"timestamp": timestamp, "state": self.accounts_state}
+            if not file_system.path_exists(path=f"data/{self.history_file}"):
+                file_system.add_file(directory="data", file_name=self.history_file, content=json.dumps(state_to_dump) + "\n")
+            else:
+                file_system.append_to_file(directory="data", file_name=self.history_file, content=json.dumps(state_to_dump) + "\n")
+
+    async def load_account_state_history(self, 
+                                        limit: Optional[int] = None,
+                                        cursor: Optional[str] = None,
+                                        start_time: Optional[datetime] = None,
+                                        end_time: Optional[datetime] = None):
+        """
+        Load the account state history from the database with pagination.
+        :return: Tuple of (data, next_cursor, has_more).
+        """
+        await self.ensure_db_initialized()
+        
+        try:
+            async with self.db_manager.get_session_context() as session:
+                repository = AccountRepository(session)
+                return await repository.get_account_state_history(
+                    limit=limit,
+                    cursor=cursor,
+                    start_time=start_time,
+                    end_time=end_time
+                )
+        except Exception as e:
+            logging.error(f"Error loading account state history from database: {e}")
+            # Fallback to JSON file (simplified, no pagination)
+            history = []
+            try:
+                with open("bots/data/" + self.history_file, "r") as file:
+                    for line in file:
+                        if line.strip():  # Check if the line is not empty
+                            history.append(json.loads(line))
+                            if limit and len(history) >= limit:
+                                break
+            except FileNotFoundError:
+                logging.warning("No account state history file found.")
+            return history, None, False
 
     async def check_all_connectors(self):
         """
@@ -317,3 +362,147 @@ class AccountsService:
         self.accounts_state.pop(account_name)
         # Clear all connectors for this account from cache
         self.connector_manager.clear_cache(account_name)
+    
+    async def get_account_current_state(self, account_name: str) -> Dict[str, List[Dict]]:
+        """
+        Get current state for a specific account from database.
+        """
+        await self.ensure_db_initialized()
+        
+        try:
+            async with self.db_manager.get_session_context() as session:
+                repository = AccountRepository(session)
+                return await repository.get_account_current_state(account_name)
+        except Exception as e:
+            logging.error(f"Error getting account current state: {e}")
+            # Fallback to in-memory state
+            return self.accounts_state.get(account_name, {})
+    
+    async def get_account_state_history(self, 
+                                        account_name: str, 
+                                        limit: Optional[int] = None,
+                                        cursor: Optional[str] = None,
+                                        start_time: Optional[datetime] = None,
+                                        end_time: Optional[datetime] = None):
+        """
+        Get historical state for a specific account with pagination.
+        """
+        await self.ensure_db_initialized()
+        
+        try:
+            async with self.db_manager.get_session_context() as session:
+                repository = AccountRepository(session)
+                return await repository.get_account_state_history(
+                    account_name=account_name, 
+                    limit=limit,
+                    cursor=cursor,
+                    start_time=start_time,
+                    end_time=end_time
+                )
+        except Exception as e:
+            logging.error(f"Error getting account state history: {e}")
+            return [], None, False
+    
+    async def get_connector_current_state(self, account_name: str, connector_name: str) -> List[Dict]:
+        """
+        Get current state for a specific connector.
+        """
+        await self.ensure_db_initialized()
+        
+        try:
+            async with self.db_manager.get_session_context() as session:
+                repository = AccountRepository(session)
+                return await repository.get_connector_current_state(account_name, connector_name)
+        except Exception as e:
+            logging.error(f"Error getting connector current state: {e}")
+            # Fallback to in-memory state
+            return self.accounts_state.get(account_name, {}).get(connector_name, [])
+    
+    async def get_connector_state_history(self, 
+                                          account_name: str, 
+                                          connector_name: str, 
+                                          limit: Optional[int] = None,
+                                          cursor: Optional[str] = None,
+                                          start_time: Optional[datetime] = None,
+                                          end_time: Optional[datetime] = None):
+        """
+        Get historical state for a specific connector with pagination.
+        """
+        await self.ensure_db_initialized()
+        
+        try:
+            async with self.db_manager.get_session_context() as session:
+                repository = AccountRepository(session)
+                return await repository.get_account_state_history(
+                    account_name=account_name, 
+                    connector_name=connector_name,
+                    limit=limit,
+                    cursor=cursor,
+                    start_time=start_time,
+                    end_time=end_time
+                )
+        except Exception as e:
+            logging.error(f"Error getting connector state history: {e}")
+            return [], None, False
+    
+    async def get_all_unique_tokens(self) -> List[str]:
+        """
+        Get all unique tokens across all accounts and connectors.
+        """
+        await self.ensure_db_initialized()
+        
+        try:
+            async with self.db_manager.get_session_context() as session:
+                repository = AccountRepository(session)
+                return await repository.get_all_unique_tokens()
+        except Exception as e:
+            logging.error(f"Error getting unique tokens: {e}")
+            # Fallback to in-memory state
+            tokens = set()
+            for account_data in self.accounts_state.values():
+                for connector_data in account_data.values():
+                    for token_info in connector_data:
+                        tokens.add(token_info.get("token"))
+            return sorted(list(tokens))
+    
+    async def get_token_current_state(self, token: str) -> List[Dict]:
+        """
+        Get current state of a specific token across all accounts.
+        """
+        await self.ensure_db_initialized()
+        
+        try:
+            async with self.db_manager.get_session_context() as session:
+                repository = AccountRepository(session)
+                return await repository.get_token_current_state(token)
+        except Exception as e:
+            logging.error(f"Error getting token current state: {e}")
+            return []
+    
+    async def get_portfolio_value(self, account_name: Optional[str] = None) -> Dict[str, any]:
+        """
+        Get total portfolio value, optionally filtered by account.
+        """
+        await self.ensure_db_initialized()
+        
+        try:
+            async with self.db_manager.get_session_context() as session:
+                repository = AccountRepository(session)
+                return await repository.get_portfolio_value(account_name)
+        except Exception as e:
+            logging.error(f"Error getting portfolio value: {e}")
+            # Fallback to in-memory calculation
+            portfolio = {"accounts": {}, "total_value": 0}
+            
+            accounts_to_process = [account_name] if account_name else self.accounts_state.keys()
+            
+            for acc_name in accounts_to_process:
+                account_value = 0
+                if acc_name in self.accounts_state:
+                    for connector_data in self.accounts_state[acc_name].values():
+                        for token_info in connector_data:
+                            account_value += token_info.get("value", 0)
+                    portfolio["accounts"][acc_name] = account_value
+                    portfolio["total_value"] += account_value
+            
+            return portfolio
