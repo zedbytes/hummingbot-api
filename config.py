@@ -14,3 +14,6 @@ BROKER_PASSWORD = os.getenv("BROKER_PASSWORD", "password")
 PASSWORD_VERIFICATION_PATH = "bots/credentials/master_account/.password_verification"
 BANNED_TOKENS = os.getenv("BANNED_TOKENS", "NAV,ARS,ETHW,ETHF").split(",")
 LOGFIRE_ENVIRONMENT = os.getenv("LOGFIRE_ENVIRONMENT", "dev")
+
+# Database configuration
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://hbot:backend-api@localhost:5432/backend_api")
