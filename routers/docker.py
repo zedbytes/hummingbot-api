@@ -8,10 +8,10 @@ from utils.bot_archiver import BotArchiver
 from services.docker_service import DockerService
 from deps import get_docker_service, get_bot_archiver
 
-router = APIRouter(tags=["Docker"])
+router = APIRouter(tags=["Docker"], prefix="/docker")
 
 
-@router.get("/is-docker-running")
+@router.get("/running")
 async def is_docker_running(docker_manager: DockerService = Depends(get_docker_service)):
     return {"is_docker_running": docker_manager.is_docker_running()}
 

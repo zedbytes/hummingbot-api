@@ -5,10 +5,10 @@ from hummingbot.strategy_v2.backtesting.backtesting_engine_base import Backtesti
 
 from utils.etl_databases import PerformanceDataSource
 
-router = APIRouter(tags=["Performance"])
+router = APIRouter(tags=["Performance"], prefix="/performance")
 
 
-@router.post("/get-performance-results")
+@router.post("/results")
 async def get_performance_results(payload: Dict[str, Any]):
     executors = payload.get("executors")
     data_source = PerformanceDataSource(executors)

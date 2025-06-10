@@ -11,16 +11,16 @@ from deps import get_bots_orchestrator, get_docker_service, get_bot_archiver
 from utils.file_system import FileSystemUtil
 from utils.bot_archiver import BotArchiver
 
-router = APIRouter(tags=["Bot Orchestration"])
+router = APIRouter(tags=["Bot Orchestration"], prefix="/bot-orchestration")
 
 
-@router.get("/get-active-bots-status")
+@router.get("/status")
 def get_active_bots_status(bots_manager: BotsOrchestrator = Depends(get_bots_orchestrator)):
     """Returns the cached status of all active bots."""
     return {"status": "success", "data": bots_manager.get_all_bots_status()}
 
 
-@router.get("/mqtt-status")
+@router.get("/mqtt")
 def get_mqtt_status(bots_manager: BotsOrchestrator = Depends(get_bots_orchestrator)):
     """Get MQTT connection status and discovered bots."""
     mqtt_connected = bots_manager.mqtt_manager.is_connected
@@ -44,7 +44,7 @@ def get_mqtt_status(bots_manager: BotsOrchestrator = Depends(get_bots_orchestrat
     }
 
 
-@router.get("/get-bot-status/{bot_name}")
+@router.get("/{bot_name}/status")
 def get_bot_status(bot_name: str, bots_manager: BotsOrchestrator = Depends(get_bots_orchestrator)):
     response = bots_manager.get_bot_status(bot_name)
     if not response:
@@ -55,7 +55,7 @@ def get_bot_status(bot_name: str, bots_manager: BotsOrchestrator = Depends(get_b
     }
 
 
-@router.get("/get-bot-history/{bot_name}")
+@router.get("/{bot_name}/history")
 async def get_bot_history(
     bot_name: str, 
     days: int = 0, 

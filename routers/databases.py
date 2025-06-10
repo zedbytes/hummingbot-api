@@ -10,16 +10,16 @@ from fastapi import APIRouter
 
 from utils.file_system import FileSystemUtil
 
-router = APIRouter(tags=["Databases"])
+router = APIRouter(tags=["Databases"], prefix="/databases")
 file_system = FileSystemUtil()
 
 
-@router.post("/list-databases", response_model=List[str])
+@router.get("/", response_model=List[str])
 async def list_databases():
     return file_system.list_databases()
 
 
-@router.post("/read-databases", response_model=List[Dict[str, Any]])
+@router.post("/read", response_model=List[Dict[str, Any]])
 async def read_databases(db_paths: List[str] = None):
     dbs = []
     for db_path in db_paths:
@@ -51,7 +51,7 @@ async def read_databases(db_paths: List[str] = None):
     return dbs
 
 
-@router.post("/create-checkpoint", response_model=Dict[str, Any])
+@router.post("/checkpoint", response_model=Dict[str, Any])
 async def create_checkpoint(db_paths: List[str]):
     try:
         dbs = await read_databases(db_paths)
@@ -76,12 +76,12 @@ async def create_checkpoint(db_paths: List[str]):
         return {"message": f"Error: {str(e)}"}
 
 
-@router.post("/list-checkpoints", response_model=List[str])
+@router.get("/checkpoints", response_model=List[str])
 async def list_checkpoints(full_path: bool):
     return file_system.list_checkpoints(full_path)
 
 
-@router.post("/load-checkpoint")
+@router.post("/checkpoints/load")
 async def load_checkpoint(checkpoint_path: str):
     try:
         etl = ETLPerformance(checkpoint_path)

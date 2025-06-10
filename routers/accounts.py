@@ -10,16 +10,16 @@ from utils.file_system import FileSystemUtil
 from deps import get_accounts_service
 from models import PaginatedResponse
 
-router = APIRouter(tags=["Accounts"])
+router = APIRouter(tags=["Accounts"], prefix="/accounts")
 file_system = FileSystemUtil(base_path="bots/credentials")
 
 
-@router.get("/accounts-state", response_model=Dict[str, Dict[str, List[Dict]]])
+@router.get("/state", response_model=Dict[str, Dict[str, List[Dict]]])
 async def get_all_accounts_state(accounts_service: AccountsService = Depends(get_accounts_service)):
     return accounts_service.get_accounts_state()
 
 
-@router.get("/account-state-history", response_model=PaginatedResponse)
+@router.get("/history", response_model=PaginatedResponse)
 async def get_account_state_history(
     limit: int = Query(default=100, ge=1, le=1000, description="Number of items per page"),
     cursor: str = Query(default=None, description="Cursor for next page (ISO timestamp)"),
@@ -51,7 +51,7 @@ async def get_account_state_history(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/available-connectors", response_model=List[str])
+@router.get("/connectors", response_model=List[str])
 async def available_connectors():
     return list(AllConnectorSettings.get_connector_settings().keys())
 
@@ -69,12 +69,12 @@ async def get_all_connectors_config_map(accounts_service: AccountsService = Depe
     return all_config_maps
 
 
-@router.get("/list-accounts", response_model=List[str])
+@router.get("/", response_model=List[str])
 async def list_accounts(accounts_service: AccountsService = Depends(get_accounts_service)):
     return accounts_service.list_accounts()
 
 
-@router.get("/list-credentials/{account_name}", response_model=List[str])
+@router.get("/{account_name}/credentials", response_model=List[str])
 async def list_credentials(account_name: str, accounts_service: AccountsService = Depends(get_accounts_service)):
     try:
         return accounts_service.list_credentials(account_name)
