@@ -22,7 +22,7 @@ class PaginatedResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "data": [...],
+                "data": [],
                 "pagination": {
                     "limit": 100,
                     "has_more": True,

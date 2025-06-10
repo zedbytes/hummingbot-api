@@ -1,7 +1,10 @@
 # Bot models
 from .bot import (
+    ControllerType,
     Script,
     ScriptConfig,
+    Controller,
+    ControllerConfig,
     BotAction,
     StartBotAction,
     StopBotAction,
@@ -25,8 +28,11 @@ ImageName = DockerImage  # For backward compatibility
 
 __all__ = [
     # Bot models
+    "ControllerType",
     "Script",
-    "ScriptConfig", 
+    "ScriptConfig",
+    "Controller", 
+    "ControllerConfig",
     "BotAction",
     "StartBotAction",
     "StopBotAction",
