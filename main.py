@@ -18,11 +18,12 @@ from routers import (
     accounts,
     backtesting,
     bot_orchestration,
+    controllers,
     databases,
     docker,
-    files,
     market_data,
     performance,
+    scripts,
 )
 
 # Configure logging
@@ -137,14 +138,15 @@ def auth_user(
     return credentials.username
 
 # Include all routers with authentication
-app.include_router(manage_docker.router, dependencies=[Depends(auth_user)])
-app.include_router(manage_accounts.router, dependencies=[Depends(auth_user)])
-app.include_router(manage_bot_orchestration.router, dependencies=[Depends(auth_user)])
-app.include_router(manage_files.router, dependencies=[Depends(auth_user)])
-app.include_router(manage_market_data.router, dependencies=[Depends(auth_user)])
-app.include_router(manage_backtesting.router, dependencies=[Depends(auth_user)])
-app.include_router(manage_databases.router, dependencies=[Depends(auth_user)])
-app.include_router(manage_performance.router, dependencies=[Depends(auth_user)])
+app.include_router(docker.router, dependencies=[Depends(auth_user)])
+app.include_router(accounts.router, dependencies=[Depends(auth_user)])
+app.include_router(bot_orchestration.router, dependencies=[Depends(auth_user)])
+app.include_router(controllers.router, dependencies=[Depends(auth_user)])
+app.include_router(scripts.router, dependencies=[Depends(auth_user)])
+app.include_router(market_data.router, dependencies=[Depends(auth_user)])
+app.include_router(backtesting.router, dependencies=[Depends(auth_user)])
+app.include_router(databases.router, dependencies=[Depends(auth_user)])
+app.include_router(performance.router, dependencies=[Depends(auth_user)])
 
 @app.get("/")
 async def root():
