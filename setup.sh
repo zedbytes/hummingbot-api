@@ -6,10 +6,6 @@
 
 set -e  # Exit on any error
 
-echo "🚀 Backend API Environment Setup"
-echo "================================="
-echo ""
-
 # Colors for better output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -19,86 +15,41 @@ PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# Function to prompt for input with default value
-prompt_with_default() {
-    local prompt="$1"
-    local default="$2"
-    local result
-    
-    echo -n -e "${CYAN}$prompt${NC} [${YELLOW}$default${NC}]: "
-    read -r result
-    echo "${result:-$default}"
-}
+echo "🚀 Backend API Setup"
+echo ""
 
-# Function to prompt for password (hidden input)
-prompt_password() {
-    local prompt="$1"
-    local default="$2"
-    local result
-    
-    echo -n -e "${CYAN}$prompt${NC} [${YELLOW}$default${NC}]: "
-    read -r -s result
-    echo ""  # New line after hidden input
-    echo "${result:-$default}"
-}
+echo -n "Config password [default: admin]: "
+read CONFIG_PASSWORD
+CONFIG_PASSWORD=${CONFIG_PASSWORD:-admin}
 
-echo -e "${BLUE}📁 Project Configuration${NC}"
-echo "========================"
+echo -n "API username [default: admin]: "
+read USERNAME
+USERNAME=${USERNAME:-admin}
 
-# Basic paths and project settings
-BOTS_PATH=$(prompt_with_default "Bots directory path" "$(pwd)")
-CONFIG_PASSWORD=$(prompt_password "Configuration encryption password" "a")
+echo -n "API password [default: admin]: "
+read PASSWORD
+PASSWORD=${PASSWORD:-admin}
+
+# Set paths and defaults
+BOTS_PATH=$(pwd)
+
+# Use sensible defaults for everything else
+DEBUG_MODE="false"
+BROKER_HOST="localhost"
+BROKER_PORT="1883"
+BROKER_USERNAME="admin"
+BROKER_PASSWORD="password"
+DATABASE_URL="postgresql+asyncpg://hbot:backend-api@localhost:5432/backend_api"
+CLEANUP_INTERVAL="300"
+FEED_TIMEOUT="600"
+AWS_API_KEY=""
+AWS_SECRET_KEY=""
+S3_BUCKET=""
+LOGFIRE_ENV="dev"
+BANNED_TOKENS="NAV,ARS,ETHW,ETHF"
 
 echo ""
-echo -e "${PURPLE}🔐 Security Configuration${NC}"
-echo "========================="
-
-# Security settings
-USERNAME=$(prompt_with_default "API username" "admin")
-PASSWORD=$(prompt_password "API password" "admin")
-DEBUG_MODE=$(prompt_with_default "Enable debug mode (true/false)" "false")
-
-echo ""
-echo -e "${GREEN}🔗 MQTT Broker Configuration${NC}"
-echo "============================="
-
-# Broker settings
-BROKER_HOST=$(prompt_with_default "MQTT broker host" "localhost")
-BROKER_PORT=$(prompt_with_default "MQTT broker port" "1883")
-BROKER_USERNAME=$(prompt_with_default "MQTT broker username" "admin")
-BROKER_PASSWORD=$(prompt_password "MQTT broker password" "password")
-
-echo ""
-echo -e "${YELLOW}💾 Database Configuration${NC}"
-echo "========================="
-
-# Database settings
-DATABASE_URL=$(prompt_with_default "Database URL" "postgresql+asyncpg://hbot:backend-api@localhost:5432/backend_api")
-
-echo ""
-echo -e "${CYAN}📊 Market Data Configuration${NC}"
-echo "============================"
-
-# Market data settings
-CLEANUP_INTERVAL=$(prompt_with_default "Feed cleanup interval (seconds)" "300")
-FEED_TIMEOUT=$(prompt_with_default "Feed timeout (seconds)" "600")
-
-echo ""
-echo -e "${PURPLE}☁️ AWS Configuration (Optional)${NC}"
-echo "==============================="
-
-# AWS settings (optional)
-AWS_API_KEY=$(prompt_with_default "AWS API Key (optional)" "")
-AWS_SECRET_KEY=$(prompt_password "AWS Secret Key (optional)" "")
-S3_BUCKET=$(prompt_with_default "S3 Default Bucket (optional)" "")
-
-echo ""
-echo -e "${BLUE}⚙️ Application Settings${NC}"
-echo "======================"
-
-# Application settings
-LOGFIRE_ENV=$(prompt_with_default "Logfire environment" "dev")
-BANNED_TOKENS=$(prompt_with_default "Banned tokens (comma-separated)" "NAV,ARS,ETHW,ETHF")
+echo -e "${GREEN}✅ Using sensible defaults for MQTT, Database, and other settings${NC}"
 
 echo ""
 echo -e "${GREEN}📝 Creating .env file...${NC}"
@@ -178,6 +129,14 @@ fi
 echo ""
 echo -e "${GREEN}🎉 Setup Complete!${NC}"
 echo ""
+
+# Check if password verification file exists
+if [ ! -f "bots/credentials/master_account/.password_verification" ]; then
+    echo -e "${YELLOW}📌 Note:${NC} Password verification file will be created on first startup"
+    echo -e "   Location: ${BLUE}bots/credentials/master_account/.password_verification${NC}"
+    echo ""
+fi
+
 echo -e "${YELLOW}Next steps:${NC}"
 echo "1. Review the .env file if needed: ${BLUE}cat .env${NC}"
 echo "2. Install dependencies: ${BLUE}make install${NC}"
@@ -185,4 +144,5 @@ echo "3. Start the API: ${BLUE}make run${NC}"
 echo ""
 echo -e "${PURPLE}💡 Pro tip:${NC} You can modify environment variables in .env file anytime"
 echo -e "${PURPLE}📚 Documentation:${NC} Check config.py for all available settings"
+echo -e "${PURPLE}🔒 Security:${NC} The password verification file secures bot credentials"
 echo ""
