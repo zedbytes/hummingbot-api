@@ -31,9 +31,9 @@ Run the API using uvicorn with the following command:
 For running the project using Docker, follow these steps:
 
 1. **Set up Environment Variables**:
-   - Execute the `set_environment.sh` script to configure the necessary environment variables in the `.env` file:
+   - Execute the `setup.sh` script to configure the necessary environment variables in the `.env` file:
      ```bash
-     ./set_environment.sh
+     ./setup.sh
      ```
 
 2. **Build and Run with Docker Compose**:
