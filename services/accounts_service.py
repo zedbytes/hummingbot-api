@@ -249,7 +249,7 @@ class AccountsService:
                 tokens_info = []
                 try:
                     balances = [{"token": key, "units": value} for key, value in connector.get_all_balances().items() if
-                                value != Decimal("0") and key not in settings.app.banned_tokens]
+                                value != Decimal("0") and key not in settings.banned_tokens]
                     unique_tokens = [balance["token"] for balance in balances]
                     trading_pairs = [self.get_default_market(token, connector_name) for token in unique_tokens if "USD" not in token]
                     last_traded_prices = await self._safe_get_last_traded_prices(connector, trading_pairs)

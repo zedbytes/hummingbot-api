@@ -73,10 +73,6 @@ class AppSettings(BaseSettings):
     password_verification_path: str = "bots/credentials/master_account/.password_verification"
     
     # Environment-configurable settings
-    banned_tokens: List[str] = Field(
-        default=["NAV", "ARS", "ETHW", "ETHF"],
-        description="List of banned trading tokens"
-    )
     logfire_environment: str = Field(
         default="dev",
         description="Logfire environment name"
@@ -99,6 +95,12 @@ class Settings(BaseSettings):
     security: SecuritySettings = Field(default_factory=SecuritySettings)
     aws: AWSSettings = Field(default_factory=AWSSettings)
     app: AppSettings = Field(default_factory=AppSettings)
+    
+    # Direct banned_tokens field to handle env parsing
+    banned_tokens: List[str] = Field(
+        default=["NAV", "ARS", "ETHW", "ETHF"],
+        description="List of banned trading tokens"
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
