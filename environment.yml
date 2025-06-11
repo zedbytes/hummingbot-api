@@ -24,3 +24,4 @@ dependencies:
       - asyncpg
       - psycopg2-binary
       - greenlet
+      - pydantic-settings
