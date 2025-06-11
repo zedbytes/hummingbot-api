@@ -1,4 +1,3 @@
-import os
 import secrets
 from contextlib import asynccontextmanager
 from typing import Annotated
@@ -8,11 +7,15 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.middleware.cors import CORSMiddleware
+from hummingbot.data_feed.market_data_provider import MarketDataProvider
+from hummingbot.client.config.config_crypt import ETHKeyFileSecretManger
 
-from config import LOGFIRE_ENVIRONMENT, BROKER_HOST, BROKER_PASSWORD, BROKER_PORT, BROKER_USERNAME
+from config import settings
+from utils.security import BackendAPISecurity
 from services.bots_orchestrator import BotsOrchestrator
 from services.accounts_service import AccountsService
 from services.docker_service import DockerService
+from services.market_data_feed_manager import MarketDataFeedManager
 from utils.bot_archiver import BotArchiver
 from routers import (
     accounts,
@@ -41,10 +44,10 @@ logging.getLogger('services.mqtt_manager').setLevel(logging.DEBUG)
 # Load environment variables early
 load_dotenv()
 
-# Environment variables
-username = os.getenv("USERNAME", "admin")
-password = os.getenv("PASSWORD", "admin")
-debug_mode = os.getenv("DEBUG_MODE", "False").lower() in ("true", "1", "t")
+# Get settings from Pydantic Settings
+username = settings.security.username
+password = settings.security.password
+debug_mode = settings.security.debug_mode
 
 # Security setup
 security = HTTPBasic()
@@ -58,38 +61,60 @@ async def lifespan(app: FastAPI):
     """
     # Initialize services
     bots_orchestrator = BotsOrchestrator(
-        broker_host=BROKER_HOST,
-        broker_port=BROKER_PORT,
-        broker_username=BROKER_USERNAME,
-        broker_password=BROKER_PASSWORD
+        broker_host=settings.broker.host,
+        broker_port=settings.broker.port,
+        broker_username=settings.broker.username,
+        broker_password=settings.broker.password
     )
     
     accounts_service = AccountsService()
     docker_service = DockerService()
     bot_archiver = BotArchiver(
-        os.environ.get("AWS_API_KEY"),
-        os.environ.get("AWS_SECRET_KEY"),
-        os.environ.get("S3_DEFAULT_BUCKET_NAME")
+        settings.aws.api_key,
+        settings.aws.secret_key,
+        settings.aws.s3_default_bucket_name
     )
     
     # Initialize database
     await accounts_service.ensure_db_initialized()
+    
+    # Ensure password verification file exists
+    if BackendAPISecurity.new_password_required():
+        # Create secrets manager with CONFIG_PASSWORD
+        secrets_manager = ETHKeyFileSecretManger(password=settings.security.config_password)
+        BackendAPISecurity.store_password_verification(secrets_manager)
+        logging.info("Created password verification file for master_account")
+    
+    # Initialize MarketDataProvider with empty connectors (will use non-trading connectors)
+    market_data_provider = MarketDataProvider(connectors={})
+    
+    # Initialize MarketDataFeedManager with lifecycle management
+    market_data_feed_manager = MarketDataFeedManager(
+        market_data_provider=market_data_provider,
+        cleanup_interval=settings.market_data.cleanup_interval,
+        feed_timeout=settings.market_data.feed_timeout
+    )
     
     # Store services in app state
     app.state.bots_orchestrator = bots_orchestrator
     app.state.accounts_service = accounts_service
     app.state.docker_service = docker_service
     app.state.bot_archiver = bot_archiver
+    app.state.market_data_feed_manager = market_data_feed_manager
     
     # Start services
     bots_orchestrator.start_update_active_bots_loop()
     accounts_service.start_update_account_state_loop()
+    market_data_feed_manager.start()
     
     yield
     
     # Shutdown services
     bots_orchestrator.stop_update_active_bots_loop()
     accounts_service.stop_update_account_state_loop()
+    
+    # Stop market data feed manager (which will stop all feeds)
+    market_data_feed_manager.stop()
     
     # Close database connections
     await accounts_service.db_manager.close()
@@ -112,7 +137,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-logfire.configure(send_to_logfire="if-token-present", environment=LOGFIRE_ENVIRONMENT, service_name="backend-api")
+logfire.configure(send_to_logfire="if-token-present", environment=settings.app.logfire_environment, service_name="backend-api")
 logfire.instrument_fastapi(app)
 
 def auth_user(

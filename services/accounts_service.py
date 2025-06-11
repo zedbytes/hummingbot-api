@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 from fastapi import HTTPException
 from hummingbot.client.config.config_crypt import ETHKeyFileSecretManger
 
-from config import BANNED_TOKENS, CONFIG_PASSWORD, DATABASE_URL
+from config import settings
 from database import AsyncDatabaseManager, AccountRepository
 from utils.connector_manager import ConnectorManager
 from utils.file_system import FileSystemUtil
@@ -32,7 +32,7 @@ class AccountsService:
                  update_account_state_interval_minutes: int = 5,
                  default_quote: str = "USDT",
                  account_history_file: str = "account_state_history.json"):
-        self.secrets_manager = ETHKeyFileSecretManger(CONFIG_PASSWORD)
+        self.secrets_manager = ETHKeyFileSecretManger(settings.security.config_password)
         self.connector_manager = ConnectorManager(self.secrets_manager)
         self.accounts = {}
         self.accounts_state = {}
@@ -44,7 +44,7 @@ class AccountsService:
         self._update_account_state_task: Optional[asyncio.Task] = None
         
         # Database setup
-        self.db_manager = AsyncDatabaseManager(DATABASE_URL)
+        self.db_manager = AsyncDatabaseManager(settings.database.url)
         self._db_initialized = False
 
     async def ensure_db_initialized(self):
@@ -249,7 +249,7 @@ class AccountsService:
                 tokens_info = []
                 try:
                     balances = [{"token": key, "units": value} for key, value in connector.get_all_balances().items() if
-                                value != Decimal("0") and key not in BANNED_TOKENS]
+                                value != Decimal("0") and key not in settings.app.banned_tokens]
                     unique_tokens = [balance["token"] for balance in balances]
                     trading_pairs = [self.get_default_market(token, connector_name) for token in unique_tokens if "USD" not in token]
                     last_traded_prices = await self._safe_get_last_traded_prices(connector, trading_pairs)

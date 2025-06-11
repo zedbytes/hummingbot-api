@@ -5,7 +5,7 @@ from hummingbot.data_feed.candles_feed.candles_factory import CandlesFactory
 from hummingbot.strategy_v2.backtesting.backtesting_engine_base import BacktestingEngineBase
 from pydantic import BaseModel
 
-from config import CONTROLLERS_MODULE, CONTROLLERS_PATH
+from config import settings
 
 router = APIRouter(tags=["Backtesting"], prefix="/backtesting")
 candles_factory = CandlesFactory()
@@ -26,13 +26,13 @@ async def run_backtesting(backtesting_config: BacktestingConfig):
         if isinstance(backtesting_config.config, str):
             controller_config = backtesting_engine.get_controller_config_instance_from_yml(
                 config_path=backtesting_config.config,
-                controllers_conf_dir_path=CONTROLLERS_PATH,
-                controllers_module=CONTROLLERS_MODULE
+                controllers_conf_dir_path=settings.app.controllers_path,
+                controllers_module=settings.app.controllers_module
             )
         else:
             controller_config = backtesting_engine.get_controller_config_instance_from_dict(
                 config_data=backtesting_config.config,
-                controllers_module=CONTROLLERS_MODULE
+                controllers_module=settings.app.controllers_module
             )
         backtesting_results = await backtesting_engine.run_backtesting(
             controller_config=controller_config, trade_cost=backtesting_config.trade_cost,

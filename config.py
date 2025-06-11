@@ -109,18 +109,3 @@ class Settings(BaseSettings):
 
 # Create global settings instance
 settings = Settings()
-
-# Legacy exports for backward compatibility (can be removed gradually)
-CONTROLLERS_PATH = settings.app.controllers_path
-CONTROLLERS_MODULE = settings.app.controllers_module
-CONFIG_PASSWORD = settings.security.config_password
-BROKER_HOST = settings.broker.host
-BROKER_PORT = settings.broker.port
-BROKER_USERNAME = settings.broker.username
-BROKER_PASSWORD = settings.broker.password
-PASSWORD_VERIFICATION_PATH = settings.app.password_verification_path
-BANNED_TOKENS = settings.app.banned_tokens
-LOGFIRE_ENVIRONMENT = settings.app.logfire_environment
-DATABASE_URL = settings.database.url
-MARKET_DATA_CLEANUP_INTERVAL = settings.market_data.cleanup_interval
-MARKET_DATA_FEED_TIMEOUT = settings.market_data.feed_timeout

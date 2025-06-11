@@ -10,7 +10,7 @@ from hummingbot.client.config.config_helpers import (
 )
 from hummingbot.client.config.security import Security
 
-from config import PASSWORD_VERIFICATION_PATH
+from config import settings
 from utils.file_system import FileSystemUtil
 from utils.backend_api_config_adapter import BackendAPIConfigAdapter
 
@@ -62,17 +62,17 @@ class BackendAPISecurity(Security):
 
     @staticmethod
     def new_password_required() -> bool:
-        return not PASSWORD_VERIFICATION_PATH.exists()
+        return not Path(settings.app.password_verification_path).exists()
 
     @staticmethod
     def store_password_verification(secrets_manager: BaseSecretsManager):
         encrypted_word = secrets_manager.encrypt_secret_value(PASSWORD_VERIFICATION_WORD, PASSWORD_VERIFICATION_WORD)
-        FileSystemUtil.ensure_file_and_dump_text(PASSWORD_VERIFICATION_PATH, encrypted_word)
+        FileSystemUtil.ensure_file_and_dump_text(settings.app.password_verification_path, encrypted_word)
 
     @staticmethod
     def validate_password(secrets_manager: BaseSecretsManager) -> bool:
         valid = False
-        with open(PASSWORD_VERIFICATION_PATH, "r") as f:
+        with open(settings.app.password_verification_path, "r") as f:
             encrypted_word = f.read()
         try:
             decrypted_word = secrets_manager.decrypt_secret_value(PASSWORD_VERIFICATION_WORD, encrypted_word)

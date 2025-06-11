@@ -6,6 +6,7 @@ import docker
 from docker.errors import DockerException
 from docker.types import LogConfig
 
+from config import settings
 from models import HummingbotInstanceConfig
 from utils.file_system import FileSystemUtil
 
@@ -164,7 +165,7 @@ class DockerService:
 
         # Set up environment variables
         environment = {}
-        password = os.environ.get('CONFIG_PASSWORD', "a")
+        password = settings.security.config_password
         if password:
             environment["CONFIG_PASSWORD"] = password
 
