@@ -11,7 +11,32 @@ Backend-api is a dedicated solution for managing Hummingbot instances. It offers
 
 ## Getting Started
 
-### Conda Installation
+### Development Setup
+
+1. **Initial Setup**:
+   - Run the setup script to configure environment variables and start required containers (EMQX and PostgreSQL):
+     ```bash
+     ./setup.sh
+     ```
+   - This script will set up the `.env` file and start the necessary Docker containers for the message broker and database.
+
+2. **Development Mode**:
+   - Use the run script with the `--dev` flag to run the API from source:
+     ```bash
+     ./run.sh --dev
+     ```
+   - This will activate the conda environment and run the API with uvicorn for development with hot reload.
+
+3. **Production Mode**:
+   - Use the run script without flags to run with Docker Compose:
+     ```bash
+     ./run.sh
+     ```
+   - This will start all services using Docker Compose in detached mode.
+
+### Manual Setup (Alternative)
+
+#### Conda Installation
 1. Install the environment using Conda:
    ```bash
    conda env create -f environment.yml
@@ -21,13 +46,13 @@ Backend-api is a dedicated solution for managing Hummingbot instances. It offers
    conda activate backend-api
    ```
 
-### Running the API with Conda
+#### Running the API with Conda
 Run the API using uvicorn with the following command:
    ```bash
    uvicorn main:app --reload
    ```
 
-### Docker Installation and Running the API
+#### Docker Installation and Running the API
 For running the project using Docker, follow these steps:
 
 1. **Set up Environment Variables**:
