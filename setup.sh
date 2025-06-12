@@ -46,7 +46,7 @@ AWS_API_KEY=""
 AWS_SECRET_KEY=""
 S3_BUCKET=""
 LOGFIRE_ENV="dev"
-BANNED_TOKENS="NAV,ARS,ETHW,ETHF"
+BANNED_TOKENS='["NAV","ARS","ETHW","ETHF"]'
 
 echo ""
 echo -e "${GREEN}✅ Using sensible defaults for MQTT, Database, and other settings${NC}"
