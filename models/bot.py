@@ -9,25 +9,40 @@ class ControllerType(str, Enum):
     GENERIC = "generic"
 
 
-class Script(BaseModel):
-    name: str = Field(description="Script name (without .py extension)")
-    content: str = Field(description="Python script content")
+class FileContent(BaseModel):
+    """Base model for file content"""
+    content: str = Field(description="File content")
 
 
-class ScriptConfig(BaseModel):
-    name: str = Field(description="Config name (without .yml extension)")
-    content: Dict[str, Any] = Field(description="YAML content as dictionary")
+class ConfigContent(BaseModel):
+    """Base model for configuration content"""
+    content: Dict[str, Any] = Field(description="Configuration content as dictionary")
 
 
-class Controller(BaseModel):
-    name: str = Field(description="Controller name (without .py extension)")
-    type: ControllerType = Field(description="Controller category")
-    content: str = Field(description="Python controller content")
+class TypedFileContent(FileContent):
+    """File content with a type classification"""
+    type: Optional[ControllerType] = Field(default=None, description="Content category")
 
 
-class ControllerConfig(BaseModel):
-    name: str = Field(description="Config name (without .yml extension)")
-    content: Dict[str, Any] = Field(description="YAML content as dictionary")
+# Specific models using base classes
+class Script(FileContent):
+    """Python script content"""
+    pass
+
+
+class ScriptConfig(ConfigContent):
+    """Script configuration content"""
+    pass
+
+
+class Controller(TypedFileContent):
+    """Controller content with optional type (type can come from URL path)"""
+    pass
+
+
+class ControllerConfig(ConfigContent):
+    """Controller configuration content"""
+    pass
 
 
 class BotAction(BaseModel):
