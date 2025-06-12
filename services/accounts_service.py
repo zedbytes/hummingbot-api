@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 from datetime import datetime
 from decimal import Decimal
@@ -30,18 +29,23 @@ class AccountsService:
     }
 
     def __init__(self,
-                 update_account_state_interval_minutes: int = 5,
-                 default_quote: str = "USDT",
-                 account_history_file: str = "account_state_history.json"):
+                 account_update_interval: int = 5,
+                 default_quote: str = "USDT"):
+        """
+        Initialize the AccountsService.
+        
+        Args:
+            account_update_interval: How often to update account states in minutes (default: 5)
+            default_quote: Default quote currency for trading pairs (default: "USDT")
+        """
         self.secrets_manager = ETHKeyFileSecretManger(settings.security.config_password)
         self.connector_manager = ConnectorManager(self.secrets_manager)
         self.accounts = {}
         self.accounts_state = {}
         self.account_state_update_event = asyncio.Event()
         self.initialize_accounts()
-        self.update_account_state_interval = update_account_state_interval_minutes * 60
+        self.update_account_state_interval = account_update_interval * 60
         self.default_quote = default_quote
-        self.history_file = account_history_file
         self._update_account_state_task: Optional[asyncio.Task] = None
         
         # Database setup
@@ -116,13 +120,8 @@ class AccountsService:
                             
         except Exception as e:
             logging.error(f"Error saving account state to database: {e}")
-            # Fallback to JSON file
-            timestamp = datetime.now().isoformat()
-            state_to_dump = {"timestamp": timestamp, "state": self.accounts_state}
-            if not file_system.path_exists(path=f"data/{self.history_file}"):
-                file_system.add_file(directory="data", file_name=self.history_file, content=json.dumps(state_to_dump) + "\n")
-            else:
-                file_system.append_to_file(directory="data", file_name=self.history_file, content=json.dumps(state_to_dump) + "\n")
+            # Re-raise the exception since we no longer have a fallback
+            raise
 
     async def load_account_state_history(self, 
                                         limit: Optional[int] = None,
@@ -146,18 +145,8 @@ class AccountsService:
                 )
         except Exception as e:
             logging.error(f"Error loading account state history from database: {e}")
-            # Fallback to JSON file (simplified, no pagination)
-            history = []
-            try:
-                with open("bots/data/" + self.history_file, "r") as file:
-                    for line in file:
-                        if line.strip():  # Check if the line is not empty
-                            history.append(json.loads(line))
-                            if limit and len(history) >= limit:
-                                break
-            except FileNotFoundError:
-                logging.warning("No account state history file found.")
-            return history, None, False
+            # Return empty result since we no longer have a fallback
+            return [], None, False
 
     async def check_all_connectors(self):
         """
