@@ -146,3 +146,13 @@ echo -e "${PURPLE}💡 Pro tip:${NC} You can modify environment variables in .en
 echo -e "${PURPLE}📚 Documentation:${NC} Check config.py for all available settings"
 echo -e "${PURPLE}🔒 Security:${NC} The password verification file secures bot credentials"
 echo ""
+echo -e "${GREEN}🐳 Starting required Docker containers and pulling Hummingbot image...${NC}"
+
+# Run docker operations in parallel
+docker compose up emqx postgres -d &
+docker pull hummingbot/hummingbot:latest &
+
+# Wait for both operations to complete
+wait
+
+echo -e "${GREEN}✅ All Docker operations completed!${NC}"
