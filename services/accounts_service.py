@@ -293,8 +293,8 @@ class AccountsService:
         """
         return self.connector_manager.get_connector_config_map(connector_name)
 
-    async def add_connector_keys(self, account_name: str, connector_name: str, keys: dict):
-        new_connector = await self.connector_manager.update_connector_keys(account_name, connector_name, keys)
+    async def add_credentials(self, account_name: str, connector_name: str, credentials: dict):
+        new_connector = await self.connector_manager.update_connector_keys(account_name, connector_name, credentials)
         self.accounts[account_name][connector_name] = new_connector
         await self.update_account_state()
         await self.dump_account_state()
