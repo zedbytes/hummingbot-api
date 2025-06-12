@@ -91,6 +91,9 @@ async def get_active_feeds(request: Request):
     """
     Get information about currently active market data feeds.
     
+    Args:
+        request: FastAPI request object to access application state
+        
     Returns:
         Dictionary with active feeds information including last access times and expiration
     """
@@ -107,7 +110,7 @@ async def get_market_data_settings():
     Get current market data settings for debugging.
     
     Returns:
-        Current market data configuration
+        Dictionary with current market data configuration including cleanup and timeout settings
     """
     from config import settings
     return {

@@ -10,13 +10,22 @@ router = APIRouter(tags=["Performance"], prefix="/performance")
 
 @router.post("/results")
 async def get_performance_results(payload: Dict[str, Any]):
+    """
+    Calculate performance results from executor data.
+    
+    Args:
+        payload: Dictionary containing executors data for performance analysis
+        
+    Returns:
+        Dictionary with executors and calculated performance results
+    """
     executors = payload.get("executors")
     data_source = PerformanceDataSource(executors)
     performance_results = {}
     try:
         backtesting_engine = BacktestingEngineBase()
         executor_info_list = data_source.executor_info_list
-        performance_results["results"] = backtesting_engine.summarize_results(executor_info_list    )
+        performance_results["results"] = backtesting_engine.summarize_results(executor_info_list)
         results = performance_results["results"]
         results["sharpe_ratio"] = results["sharpe_ratio"] if results["sharpe_ratio"] is not None else 0
         return {

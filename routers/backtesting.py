@@ -22,6 +22,19 @@ class BacktestingConfig(BaseModel):
 
 @router.post("/run-backtesting")
 async def run_backtesting(backtesting_config: BacktestingConfig):
+    """
+    Run a backtesting simulation with the provided configuration.
+    
+    Args:
+        backtesting_config: Configuration for the backtesting including start/end time,
+                          resolution, trade cost, and controller config
+                          
+    Returns:
+        Dictionary containing executors, processed data, and results from the backtest
+        
+    Raises:
+        Returns error dictionary if backtesting fails
+    """
     try:
         if isinstance(backtesting_config.config, str):
             controller_config = backtesting_engine.get_controller_config_instance_from_yml(

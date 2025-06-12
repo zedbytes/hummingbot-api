@@ -16,13 +16,29 @@ router = APIRouter(tags=["Bot Orchestration"], prefix="/bot-orchestration")
 
 @router.get("/status")
 def get_active_bots_status(bots_manager: BotsOrchestrator = Depends(get_bots_orchestrator)):
-    """Returns the cached status of all active bots."""
+    """
+    Get the status of all active bots.
+    
+    Args:
+        bots_manager: Bot orchestrator service dependency
+        
+    Returns:
+        Dictionary with status and data containing all active bot statuses
+    """
     return {"status": "success", "data": bots_manager.get_all_bots_status()}
 
 
 @router.get("/mqtt")
 def get_mqtt_status(bots_manager: BotsOrchestrator = Depends(get_bots_orchestrator)):
-    """Get MQTT connection status and discovered bots."""
+    """
+    Get MQTT connection status and discovered bots.
+    
+    Args:
+        bots_manager: Bot orchestrator service dependency
+        
+    Returns:
+        Dictionary with MQTT connection status, discovered bots, and broker information
+    """
     mqtt_connected = bots_manager.mqtt_manager.is_connected
     discovered_bots = bots_manager.mqtt_manager.get_discovered_bots()
     active_bots = list(bots_manager.active_bots.keys())
@@ -46,6 +62,19 @@ def get_mqtt_status(bots_manager: BotsOrchestrator = Depends(get_bots_orchestrat
 
 @router.get("/{bot_name}/status")
 def get_bot_status(bot_name: str, bots_manager: BotsOrchestrator = Depends(get_bots_orchestrator)):
+    """
+    Get the status of a specific bot.
+    
+    Args:
+        bot_name: Name of the bot to get status for
+        bots_manager: Bot orchestrator service dependency
+        
+    Returns:
+        Dictionary with bot status information
+        
+    Raises:
+        HTTPException: 404 if bot not found
+    """
     response = bots_manager.get_bot_status(bot_name)
     if not response:
         raise HTTPException(status_code=404, detail="Bot not found")
@@ -64,7 +93,20 @@ async def get_bot_history(
     timeout: float = 30.0,
     bots_manager: BotsOrchestrator = Depends(get_bots_orchestrator)
 ):
-    """Get trading history for a bot with optional parameters."""
+    """
+    Get trading history for a bot with optional parameters.
+    
+    Args:
+        bot_name: Name of the bot to get history for
+        days: Number of days of history to retrieve (0 for all)
+        verbose: Whether to include verbose output
+        precision: Decimal precision for numerical values
+        timeout: Timeout in seconds for the operation
+        bots_manager: Bot orchestrator service dependency
+        
+    Returns:
+        Dictionary with bot trading history
+    """
     response = await bots_manager.get_bot_history(
         bot_name, 
         days=days, 
@@ -77,6 +119,16 @@ async def get_bot_history(
 
 @router.post("/start-bot")
 async def start_bot(action: StartBotAction, bots_manager: BotsOrchestrator = Depends(get_bots_orchestrator)):
+    """
+    Start a bot with the specified configuration.
+    
+    Args:
+        action: StartBotAction containing bot configuration parameters
+        bots_manager: Bot orchestrator service dependency
+        
+    Returns:
+        Dictionary with status and response from bot start operation
+    """
     response = await bots_manager.start_bot(action.bot_name, log_level=action.log_level, script=action.script,
                                       conf=action.conf, async_backend=action.async_backend)
     return {"status": "success", "response": response}
@@ -84,6 +136,16 @@ async def start_bot(action: StartBotAction, bots_manager: BotsOrchestrator = Dep
 
 @router.post("/stop-bot")
 async def stop_bot(action: StopBotAction, bots_manager: BotsOrchestrator = Depends(get_bots_orchestrator)):
+    """
+    Stop a bot with the specified configuration.
+    
+    Args:
+        action: StopBotAction containing bot stop parameters
+        bots_manager: Bot orchestrator service dependency
+        
+    Returns:
+        Dictionary with status and response from bot stop operation
+    """
     response = await bots_manager.stop_bot(action.bot_name, skip_order_cancellation=action.skip_order_cancellation,
                                      async_backend=action.async_backend)
     return {"status": "success", "response": response}
@@ -222,7 +284,16 @@ async def create_hummingbot_instance(
     config: HummingbotInstanceConfig, 
     docker_manager: DockerService = Depends(get_docker_service)
 ):
-    """Create a new Hummingbot instance with the specified configuration."""
+    """
+    Create a new Hummingbot instance with the specified configuration.
+    
+    Args:
+        config: Configuration for the new Hummingbot instance
+        docker_manager: Docker service dependency
+        
+    Returns:
+        Dictionary with creation response and instance details
+    """
     logging.info(f"Creating hummingbot instance with config: {config}")
     response = docker_manager.create_hummingbot_instance(config)
     return response
@@ -236,6 +307,16 @@ async def deploy_v2_controllers(
     """
     Deploy a V2 strategy with controllers by generating the script config and creating the instance.
     This endpoint simplifies the deployment process for V2 controller strategies.
+    
+    Args:
+        deployment: V2ControllerDeployment configuration
+        docker_manager: Docker service dependency
+        
+    Returns:
+        Dictionary with deployment response and generated configuration details
+        
+    Raises:
+        HTTPException: 500 if deployment fails
     """
     try:
         # Generate unique script config filename with timestamp

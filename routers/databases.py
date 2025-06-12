@@ -16,11 +16,26 @@ file_system = FileSystemUtil()
 
 @router.get("/", response_model=List[str])
 async def list_databases():
+    """
+    List all available database files in the system.
+    
+    Returns:
+        List of database file paths
+    """
     return file_system.list_databases()
 
 
 @router.post("/read", response_model=List[Dict[str, Any]])
 async def read_databases(db_paths: List[str] = None):
+    """
+    Read and extract data from multiple database files.
+    
+    Args:
+        db_paths: List of database file paths to read
+        
+    Returns:
+        List of database contents with tables and status information
+    """
     dbs = []
     for db_path in db_paths:
         db = HummingbotDatabase(db_path)
@@ -53,6 +68,15 @@ async def read_databases(db_paths: List[str] = None):
 
 @router.post("/checkpoint", response_model=Dict[str, Any])
 async def create_checkpoint(db_paths: List[str]):
+    """
+    Create a checkpoint by consolidating data from multiple databases.
+    
+    Args:
+        db_paths: List of database paths to include in checkpoint
+        
+    Returns:
+        Dictionary with checkpoint creation status
+    """
     try:
         dbs = await read_databases(db_paths)
 
@@ -78,11 +102,29 @@ async def create_checkpoint(db_paths: List[str]):
 
 @router.get("/checkpoints", response_model=List[str])
 async def list_checkpoints(full_path: bool):
+    """
+    List all available checkpoint files.
+    
+    Args:
+        full_path: Whether to return full file paths or just filenames
+        
+    Returns:
+        List of checkpoint file paths or names
+    """
     return file_system.list_checkpoints(full_path)
 
 
 @router.post("/checkpoints/load")
 async def load_checkpoint(checkpoint_path: str):
+    """
+    Load data from a checkpoint file.
+    
+    Args:
+        checkpoint_path: Path to the checkpoint file to load
+        
+    Returns:
+        Dictionary with checkpoint data including executors, orders, trades, and controllers
+    """
     try:
         etl = ETLPerformance(checkpoint_path)
         executor = etl.load_executors()
