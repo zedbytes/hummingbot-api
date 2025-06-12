@@ -242,12 +242,20 @@ async def deploy_v2_controllers(
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         script_config_filename = f"{deployment.instance_name}-{timestamp}.yml"
         
+        # Ensure controller config names have .yml extension
+        controllers_with_extension = []
+        for controller in deployment.controllers_config:
+            if not controller.endswith('.yml'):
+                controllers_with_extension.append(f"{controller}.yml")
+            else:
+                controllers_with_extension.append(controller)
+        
         # Create the script config content
         script_config_content = {
             "script_file_name": "v2_with_controllers.py",
             "candles_config": [],
             "markets": {},
-            "controllers_config": deployment.controllers_config,
+            "controllers_config": controllers_with_extension,
         }
         
         # Add optional drawdown parameters if provided
