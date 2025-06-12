@@ -193,25 +193,25 @@ async def delete_credential(account_name: str, connector_name: str, accounts_ser
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@router.post("/add-connector-keys/{account_name}/{connector_name}", status_code=status.HTTP_201_CREATED)
-async def add_connector_keys(account_name: str, connector_name: str, keys: Dict, accounts_service: AccountsService = Depends(get_accounts_service)):
+@router.post("/add-credential/{account_name}/{connector_name}", status_code=status.HTTP_201_CREATED)
+async def add_credential(account_name: str, connector_name: str, credentials: Dict, accounts_service: AccountsService = Depends(get_accounts_service)):
     """
-    Add or update connector keys (API credentials) for a specific account and connector.
+    Add or update connector credentials (API keys) for a specific account and connector.
     
     Args:
         account_name: Name of the account
         connector_name: Name of the connector
-        keys: Dictionary containing the connector credentials
+        credentials: Dictionary containing the connector credentials
         
     Returns:
-        Success message when keys are added
+        Success message when credentials are added
         
     Raises:
-        HTTPException: 400 if there's an error adding the keys
+        HTTPException: 400 if there's an error adding the credentials
     """
     try:
-        await accounts_service.add_connector_keys(account_name, connector_name, keys)
-        return {"message": "Connector keys added successfully."}
+        await accounts_service.add_credentials(account_name, connector_name, credentials)
+        return {"message": "Connector credentials added successfully."}
     except Exception as e:
         accounts_service.delete_credentials(account_name, connector_name)
         raise HTTPException(status_code=400, detail=str(e))
