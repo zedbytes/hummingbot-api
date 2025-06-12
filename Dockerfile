@@ -18,7 +18,7 @@ RUN conda env create -f environment.yml && \
     rm -rf /root/.cache/pip/*
 
 # Stage 2: Runtime stage
-FROM continuumio/miniconda3-slim
+FROM continuumio/miniconda3
 
 # Install only runtime dependencies
 RUN apt-get update && \
@@ -33,7 +33,8 @@ COPY --from=builder /opt/conda/envs/backend-api /opt/conda/envs/backend-api
 WORKDIR /backend-api
 
 # Copy only necessary application files
-COPY main.py config.py deps.py models.py ./
+COPY main.py config.py deps.py ./
+COPY models ./models
 COPY routers ./routers
 COPY services ./services
 COPY utils ./utils
@@ -43,6 +44,9 @@ COPY bots/scripts ./bots/scripts
 
 # Create necessary directories
 RUN mkdir -p bots/instances bots/conf bots/credentials bots/data
+
+# Expose port
+EXPOSE 8000
 
 # Set environment variables to ensure conda env is used
 ENV PATH="/opt/conda/envs/backend-api/bin:$PATH"
