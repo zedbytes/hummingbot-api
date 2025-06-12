@@ -16,6 +16,12 @@ file_system = FileSystemUtil(base_path="bots/credentials")
 
 @router.get("/state", response_model=Dict[str, Dict[str, List[Dict]]])
 async def get_all_accounts_state(accounts_service: AccountsService = Depends(get_accounts_service)):
+    """
+    Get the current state of all accounts.
+    
+    Returns:
+        Dict containing account states with connector balances and token information
+    """
     return accounts_service.get_accounts_state()
 
 
@@ -53,16 +59,37 @@ async def get_account_state_history(
 
 @router.get("/connectors", response_model=List[str])
 async def available_connectors():
+    """
+    Get a list of all available connectors.
+    
+    Returns:
+        List of connector names supported by the system
+    """
     return list(AllConnectorSettings.get_connector_settings().keys())
 
 
 @router.get("/connector-config-map/{connector_name}", response_model=List[str])
 async def get_connector_config_map(connector_name: str, accounts_service: AccountsService = Depends(get_accounts_service)):
+    """
+    Get configuration fields required for a specific connector.
+    
+    Args:
+        connector_name: Name of the connector to get config map for
+        
+    Returns:
+        List of configuration field names required for the connector
+    """
     return accounts_service.get_connector_config_map(connector_name)
 
 
 @router.get("/all-connectors-config-map", response_model=Dict[str, List[str]])
 async def get_all_connectors_config_map(accounts_service: AccountsService = Depends(get_accounts_service)):
+    """
+    Get configuration fields for all available connectors.
+    
+    Returns:
+        Dictionary mapping connector names to their required configuration fields
+    """
     all_config_maps = {}
     for connector in list(AllConnectorSettings.get_connector_settings().keys()):
         all_config_maps[connector] = accounts_service.get_connector_config_map(connector)
@@ -71,11 +98,29 @@ async def get_all_connectors_config_map(accounts_service: AccountsService = Depe
 
 @router.get("/", response_model=List[str])
 async def list_accounts(accounts_service: AccountsService = Depends(get_accounts_service)):
+    """
+    Get a list of all account names in the system.
+    
+    Returns:
+        List of account names
+    """
     return accounts_service.list_accounts()
 
 
 @router.get("/{account_name}/credentials", response_model=List[str])
 async def list_credentials(account_name: str, accounts_service: AccountsService = Depends(get_accounts_service)):
+    """
+    Get a list of all credentials (connectors) configured for a specific account.
+    
+    Args:
+        account_name: Name of the account to list credentials for
+        
+    Returns:
+        List of credential file names (connectors) configured for the account
+        
+    Raises:
+        HTTPException: 404 if account not found
+    """
     try:
         return accounts_service.list_credentials(account_name)
     except FileNotFoundError as e:
@@ -84,26 +129,63 @@ async def list_credentials(account_name: str, accounts_service: AccountsService 
 
 @router.post("/add-account", status_code=status.HTTP_201_CREATED)
 async def add_account(account_name: str, accounts_service: AccountsService = Depends(get_accounts_service)):
+    """
+    Create a new account with default configuration files.
+    
+    Args:
+        account_name: Name of the new account to create
+        
+    Returns:
+        Success message when account is created
+        
+    Raises:
+        HTTPException: 400 if account already exists
+    """
     try:
         accounts_service.add_account(account_name)
-        return {"message": "Credential added successfully."}
+        return {"message": "Account added successfully."}
     except FileExistsError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/delete-account")
 async def delete_account(account_name: str, accounts_service: AccountsService = Depends(get_accounts_service)):
+    """
+    Delete an account and all its associated credentials.
+    
+    Args:
+        account_name: Name of the account to delete
+        
+    Returns:
+        Success message when account is deleted
+        
+    Raises:
+        HTTPException: 400 if trying to delete master account, 404 if account not found
+    """
     try:
         if account_name == "master_account":
             raise HTTPException(status_code=400, detail="Cannot delete master account.")
         accounts_service.delete_account(account_name)
-        return {"message": "Credential deleted successfully."}
+        return {"message": "Account deleted successfully."}
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.post("/delete-credential/{account_name}/{connector_name}")
 async def delete_credential(account_name: str, connector_name: str, accounts_service: AccountsService = Depends(get_accounts_service)):
+    """
+    Delete a specific connector credential for an account.
+    
+    Args:
+        account_name: Name of the account
+        connector_name: Name of the connector to delete credentials for
+        
+    Returns:
+        Success message when credential is deleted
+        
+    Raises:
+        HTTPException: 404 if credential not found
+    """
     try:
         accounts_service.delete_credentials(account_name, connector_name)
         return {"message": "Credential deleted successfully."}
@@ -113,6 +195,20 @@ async def delete_credential(account_name: str, connector_name: str, accounts_ser
 
 @router.post("/add-connector-keys/{account_name}/{connector_name}", status_code=status.HTTP_201_CREATED)
 async def add_connector_keys(account_name: str, connector_name: str, keys: Dict, accounts_service: AccountsService = Depends(get_accounts_service)):
+    """
+    Add or update connector keys (API credentials) for a specific account and connector.
+    
+    Args:
+        account_name: Name of the account
+        connector_name: Name of the connector
+        keys: Dictionary containing the connector credentials
+        
+    Returns:
+        Success message when keys are added
+        
+    Raises:
+        HTTPException: 400 if there's an error adding the keys
+    """
     try:
         await accounts_service.add_connector_keys(account_name, connector_name, keys)
         return {"message": "Connector keys added successfully."}
@@ -122,16 +218,27 @@ async def add_connector_keys(account_name: str, connector_name: str, keys: Dict,
 
 
 # Account-specific routes
-@router.get("/accounts/{account_name}/state", response_model=Dict[str, List[Dict]])
+@router.get("/{account_name}/state", response_model=Dict[str, List[Dict]])
 async def get_account_state(account_name: str, accounts_service: AccountsService = Depends(get_accounts_service)):
-    """Get current state of a specific account."""
+    """
+    Get current state of a specific account.
+    
+    Args:
+        account_name: Name of the account to get state for
+        
+    Returns:
+        Dictionary mapping connector names to lists of token information
+        
+    Raises:
+        HTTPException: 404 if account not found
+    """
     state = await accounts_service.get_account_current_state(account_name)
     if not state:
         raise HTTPException(status_code=404, detail=f"Account '{account_name}' not found")
     return state
 
 
-@router.get("/accounts/{account_name}/state/history", response_model=PaginatedResponse)
+@router.get("/{account_name}/state/history", response_model=PaginatedResponse)
 async def get_account_history(
     account_name: str,
     limit: int = Query(default=100, ge=1, le=1000, description="Number of items per page"),
@@ -140,7 +247,19 @@ async def get_account_history(
     end_time: datetime = Query(default=None, description="End time for filtering"),
     accounts_service: AccountsService = Depends(get_accounts_service)
 ):
-    """Get historical state of a specific account with pagination."""
+    """
+    Get historical state of a specific account with pagination.
+    
+    Args:
+        account_name: Name of the account to get history for
+        limit: Number of items per page (1-1000)
+        cursor: Cursor for pagination (ISO timestamp)
+        start_time: Start time for filtering results
+        end_time: End time for filtering results
+        
+    Returns:
+        Paginated response with historical account state data
+    """
     data, next_cursor, has_more = await accounts_service.get_account_state_history(
         account_name=account_name,
         limit=limit,
@@ -165,9 +284,20 @@ async def get_account_history(
     )
 
 
-@router.get("/accounts/{account_name}/value", response_model=Dict)
+@router.get("/{account_name}/value", response_model=Dict)
 async def get_account_value(account_name: str, accounts_service: AccountsService = Depends(get_accounts_service)):
-    """Get total portfolio value for a specific account."""
+    """
+    Get total portfolio value for a specific account.
+    
+    Args:
+        account_name: Name of the account to get value for
+        
+    Returns:
+        Dictionary with account name and total value
+        
+    Raises:
+        HTTPException: 404 if account not found
+    """
     value_data = await accounts_service.get_portfolio_value(account_name)
     if account_name not in value_data["accounts"]:
         raise HTTPException(status_code=404, detail=f"Account '{account_name}' not found")
@@ -177,9 +307,20 @@ async def get_account_value(account_name: str, accounts_service: AccountsService
     }
 
 
-@router.get("/accounts/{account_name}/tokens", response_model=List[Dict])
+@router.get("/{account_name}/tokens", response_model=List[Dict])
 async def get_account_tokens(account_name: str, accounts_service: AccountsService = Depends(get_accounts_service)):
-    """Get all tokens held by a specific account."""
+    """
+    Get all tokens held by a specific account with aggregated information.
+    
+    Args:
+        account_name: Name of the account to get tokens for
+        
+    Returns:
+        List of token information with total units, value, and connector breakdown
+        
+    Raises:
+        HTTPException: 404 if account not found
+    """
     state = await accounts_service.get_account_current_state(account_name)
     if not state:
         raise HTTPException(status_code=404, detail=f"Account '{account_name}' not found")
@@ -213,16 +354,28 @@ async def get_account_tokens(account_name: str, accounts_service: AccountsServic
 
 
 # Connector-specific routes
-@router.get("/accounts/{account_name}/connectors/{connector_name}/state", response_model=List[Dict])
+@router.get("/{account_name}/connectors/{connector_name}/state", response_model=List[Dict])
 async def get_connector_state(account_name: str, connector_name: str, accounts_service: AccountsService = Depends(get_accounts_service)):
-    """Get current state of a specific connector."""
+    """
+    Get current state of a specific connector.
+    
+    Args:
+        account_name: Name of the account
+        connector_name: Name of the connector
+        
+    Returns:
+        List of token information for the specific connector
+        
+    Raises:
+        HTTPException: 404 if connector not found for account
+    """
     state = await accounts_service.get_connector_current_state(account_name, connector_name)
     if not state:
         raise HTTPException(status_code=404, detail=f"Connector '{connector_name}' not found for account '{account_name}'")
     return state
 
 
-@router.get("/accounts/{account_name}/connectors/{connector_name}/state/history", response_model=PaginatedResponse)
+@router.get("/{account_name}/connectors/{connector_name}/state/history", response_model=PaginatedResponse)
 async def get_connector_history(
     account_name: str,
     connector_name: str,
@@ -232,7 +385,20 @@ async def get_connector_history(
     end_time: datetime = Query(default=None, description="End time for filtering"),
     accounts_service: AccountsService = Depends(get_accounts_service)
 ):
-    """Get historical state of a specific connector with pagination."""
+    """
+    Get historical state of a specific connector with pagination.
+    
+    Args:
+        account_name: Name of the account
+        connector_name: Name of the connector
+        limit: Number of items per page (1-1000)
+        cursor: Cursor for pagination (ISO timestamp)
+        start_time: Start time for filtering results
+        end_time: End time for filtering results
+        
+    Returns:
+        Paginated response with historical connector state data
+    """
     data, next_cursor, has_more = await accounts_service.get_connector_state_history(
         account_name=account_name,
         connector_name=connector_name,
@@ -262,13 +428,29 @@ async def get_connector_history(
 # Token-specific routes
 @router.get("/tokens", response_model=List[str])
 async def get_all_tokens(accounts_service: AccountsService = Depends(get_accounts_service)):
-    """Get all unique tokens across all accounts and connectors."""
+    """
+    Get all unique tokens across all accounts and connectors.
+    
+    Returns:
+        List of unique token symbols held across all accounts
+    """
     return await accounts_service.get_all_unique_tokens()
 
 
 @router.get("/tokens/{token}/state", response_model=List[Dict])
 async def get_token_state(token: str, accounts_service: AccountsService = Depends(get_accounts_service)):
-    """Get current state of a specific token across all accounts."""
+    """
+    Get current state of a specific token across all accounts.
+    
+    Args:
+        token: Symbol of the token to get state for
+        
+    Returns:
+        List of token holdings across all accounts and connectors
+        
+    Raises:
+        HTTPException: 404 if token not found
+    """
     state = await accounts_service.get_token_current_state(token)
     if not state:
         raise HTTPException(status_code=404, detail=f"Token '{token}' not found")
@@ -277,7 +459,18 @@ async def get_token_state(token: str, accounts_service: AccountsService = Depend
 
 @router.get("/tokens/{token}/accounts", response_model=List[Dict])
 async def get_token_accounts(token: str, accounts_service: AccountsService = Depends(get_accounts_service)):
-    """Get all accounts that hold a specific token."""
+    """
+    Get all accounts that hold a specific token with aggregated information.
+    
+    Args:
+        token: Symbol of the token to search for
+        
+    Returns:
+        List of accounts holding the token with total units, value, and connector breakdown
+        
+    Raises:
+        HTTPException: 404 if token not found
+    """
     token_states = await accounts_service.get_token_current_state(token)
     if not token_states:
         raise HTTPException(status_code=404, detail=f"Token '{token}' not found")
@@ -303,9 +496,21 @@ async def get_token_accounts(token: str, accounts_service: AccountsService = Dep
     return list(accounts.values())
 
 
-@router.get("/accounts/{account_name}/tokens/{token}", response_model=Dict)
+@router.get("/{account_name}/tokens/{token}", response_model=Dict)
 async def get_account_token_state(account_name: str, token: str, accounts_service: AccountsService = Depends(get_accounts_service)):
-    """Get state of a specific token for a specific account."""
+    """
+    Get state of a specific token for a specific account.
+    
+    Args:
+        account_name: Name of the account
+        token: Symbol of the token to get state for
+        
+    Returns:
+        Token information including total units, value, and connector breakdown
+        
+    Raises:
+        HTTPException: 404 if account or token not found
+    """
     state = await accounts_service.get_account_current_state(account_name)
     if not state:
         raise HTTPException(status_code=404, detail=f"Account '{account_name}' not found")
@@ -340,13 +545,23 @@ async def get_account_token_state(account_name: str, token: str, accounts_servic
 # Portfolio aggregation routes
 @router.get("/portfolio/value", response_model=Dict)
 async def get_portfolio_value(accounts_service: AccountsService = Depends(get_accounts_service)):
-    """Get total portfolio value across all accounts."""
+    """
+    Get total portfolio value across all accounts.
+    
+    Returns:
+        Dictionary with total portfolio value and breakdown by account
+    """
     return await accounts_service.get_portfolio_value()
 
 
 @router.get("/portfolio/tokens", response_model=List[Dict])
 async def get_portfolio_tokens(accounts_service: AccountsService = Depends(get_accounts_service)):
-    """Get all tokens with aggregated holdings across all accounts."""
+    """
+    Get all tokens with aggregated holdings across all accounts.
+    
+    Returns:
+        List of tokens with total units, value, average price, and account breakdown
+    """
     all_states = accounts_service.get_accounts_state()
     
     tokens = {}
@@ -399,7 +614,12 @@ async def get_portfolio_tokens(accounts_service: AccountsService = Depends(get_a
 
 @router.get("/portfolio/distribution", response_model=Dict)
 async def get_portfolio_distribution(accounts_service: AccountsService = Depends(get_accounts_service)):
-    """Get portfolio distribution by token and exchange."""
+    """
+    Get portfolio distribution by token, exchange, and account.
+    
+    Returns:
+        Dictionary with total value and percentage breakdowns by token, exchange, and account
+    """
     all_states = accounts_service.get_accounts_state()
     portfolio_value = await accounts_service.get_portfolio_value()
     total_value = portfolio_value["total_value"]
