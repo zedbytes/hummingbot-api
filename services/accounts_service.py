@@ -26,6 +26,7 @@ class AccountsService:
         "hyperliquid": "USD",
         "hyperliquid_perpetual": "USDC",
         "xrpl": "RLUSD",
+        "kraken": "USD",
     }
 
     def __init__(self,
