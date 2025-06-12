@@ -33,22 +33,108 @@ async def list_controllers():
     return result
 
 
-@router.get("/{controller_type}", response_model=List[str])
-async def list_controllers_by_type(controller_type: ControllerType):
+# Controller Configuration endpoints (must come before controller type routes)
+@router.get("/configs/", response_model=List[Dict])
+async def list_controller_configs():
     """
-    List controllers of a specific type.
+    List all controller configurations with metadata.
     
-    Args:
-        controller_type: Type of controllers to list
-        
     Returns:
-        List of controller names for the specified type
+        List of controller configuration objects with name, controller_name, controller_type, and other metadata
     """
     try:
-        files = file_system.list_files(f'controllers/{controller_type.value}')
-        return [f.replace('.py', '') for f in files if f.endswith('.py') and f != "__init__.py"]
+        config_files = [f for f in file_system.list_files('conf/controllers') if f.endswith('.yml')]
+        configs = []
+        
+        for config_file in config_files:
+            config_name = config_file.replace('.yml', '')
+            try:
+                config = file_system.read_yaml_file(f"conf/controllers/{config_file}")
+                configs.append({
+                    "config_name": config_name,
+                    "controller_name": config.get("controller_name", "unknown"),
+                    "controller_type": config.get("controller_type", "unknown"),
+                    "connector_name": config.get("connector_name", "unknown"),
+                    "trading_pair": config.get("trading_pair", "unknown"),
+                    "total_amount_quote": config.get("total_amount_quote", 0)
+                })
+            except Exception as e:
+                # If config is malformed, still include it with basic info
+                configs.append({
+                    "config_name": config_name,
+                    "controller_name": "error",
+                    "controller_type": "error", 
+                    "error": str(e)
+                })
+        
+        return configs
     except FileNotFoundError:
         return []
+
+
+@router.get("/configs/{config_name}", response_model=Dict)
+async def get_controller_config(config_name: str):
+    """
+    Get controller configuration by config name.
+    
+    Args:
+        config_name: Name of the configuration file to retrieve
+        
+    Returns:
+        Dictionary with controller configuration
+        
+    Raises:
+        HTTPException: 404 if configuration not found
+    """
+    try:
+        config = file_system.read_yaml_file(f"conf/controllers/{config_name}.yml")
+        return config
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Configuration '{config_name}' not found")
+
+
+@router.post("/configs/{config_name}", status_code=status.HTTP_201_CREATED)
+async def create_or_update_controller_config(config_name: str, config: Dict):
+    """
+    Create or update controller configuration.
+    
+    Args:
+        config_name: Name of the configuration file
+        config: Configuration dictionary to save
+        
+    Returns:
+        Success message when configuration is saved
+        
+    Raises:
+        HTTPException: 400 if save error occurs
+    """
+    try:
+        yaml_content = yaml.dump(config, default_flow_style=False)
+        file_system.add_file('conf/controllers', f"{config_name}.yml", yaml_content, override=True)
+        return {"message": f"Configuration '{config_name}' saved successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/configs/{config_name}")
+async def delete_controller_config(config_name: str):
+    """
+    Delete controller configuration.
+    
+    Args:
+        config_name: Name of the configuration file to delete
+        
+    Returns:
+        Success message when configuration is deleted
+        
+    Raises:
+        HTTPException: 404 if configuration not found
+    """
+    try:
+        file_system.delete_file('conf/controllers', f"{config_name}.yml")
+        return {"message": f"Configuration '{config_name}' deleted successfully"}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Configuration '{config_name}' not found")
 
 
 @router.get("/{controller_type}/{controller_name}", response_model=Dict[str, str])
@@ -80,14 +166,15 @@ async def get_controller(controller_type: ControllerType, controller_name: str):
         )
 
 
-@router.post("/{controller_type}", status_code=status.HTTP_201_CREATED)
-async def create_or_update_controller(controller_type: ControllerType, controller: Controller):
+@router.post("/{controller_type}/{controller_name}", status_code=status.HTTP_201_CREATED)
+async def create_or_update_controller(controller_type: ControllerType, controller_name: str, controller: Controller):
     """
     Create or update a controller.
     
     Args:
         controller_type: Type of controller to create/update
-        controller: Controller object with name, type, and content
+        controller_name: Name of the controller (from URL path)
+        controller: Controller object with content (and optional type for validation)
         
     Returns:
         Success message when controller is saved
@@ -95,7 +182,8 @@ async def create_or_update_controller(controller_type: ControllerType, controlle
     Raises:
         HTTPException: 400 if controller type mismatch or save error
     """
-    if controller.type != controller_type:
+    # If type is provided in body, validate it matches URL
+    if controller.type is not None and controller.type != controller_type:
         raise HTTPException(
             status_code=400, 
             detail=f"Controller type mismatch: URL has '{controller_type}', body has '{controller.type}'"
@@ -104,11 +192,11 @@ async def create_or_update_controller(controller_type: ControllerType, controlle
     try:
         file_system.add_file(
             f'controllers/{controller_type.value}', 
-            f"{controller.name}.py", 
+            f"{controller_name}.py", 
             controller.content, 
             override=True
         )
-        return {"message": f"Controller '{controller.name}' saved successfully in '{controller_type.value}'"}
+        return {"message": f"Controller '{controller_name}' saved successfully in '{controller_type.value}'"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -138,28 +226,6 @@ async def delete_controller(controller_type: ControllerType, controller_name: st
         )
 
 
-# Controller Configuration endpoints
-@router.get("/{controller_name}/config", response_model=Dict)
-async def get_controller_config(controller_name: str):
-    """
-    Get controller configuration.
-    
-    Args:
-        controller_name: Name of the controller to get config for
-        
-    Returns:
-        Dictionary with controller configuration
-        
-    Raises:
-        HTTPException: 404 if configuration not found
-    """
-    try:
-        config = file_system.read_yaml_file(f"bots/conf/controllers/{controller_name}.yml")
-        return config
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=f"Configuration for controller '{controller_name}' not found")
-
-
 @router.get("/{controller_type}/{controller_name}/config/template", response_model=Dict)
 async def get_controller_config_template(controller_type: ControllerType, controller_name: str):
     """
@@ -187,59 +253,6 @@ async def get_controller_config_template(controller_type: ControllerType, contro
     return json.loads(json.dumps(config_fields, default=str))
 
 
-@router.post("/{controller_name}/config", status_code=status.HTTP_201_CREATED)
-async def create_or_update_controller_config(controller_name: str, config: Dict):
-    """
-    Create or update controller configuration.
-    
-    Args:
-        controller_name: Name of the controller
-        config: Configuration dictionary to save
-        
-    Returns:
-        Success message when configuration is saved
-        
-    Raises:
-        HTTPException: 400 if save error occurs
-    """
-    try:
-        yaml_content = yaml.dump(config, default_flow_style=False)
-        file_system.add_file('conf/controllers', f"{controller_name}.yml", yaml_content, override=True)
-        return {"message": f"Configuration for controller '{controller_name}' saved successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.delete("/{controller_name}/config")
-async def delete_controller_config(controller_name: str):
-    """
-    Delete controller configuration.
-    
-    Args:
-        controller_name: Name of the controller to delete config for
-        
-    Returns:
-        Success message when configuration is deleted
-        
-    Raises:
-        HTTPException: 404 if configuration not found
-    """
-    try:
-        file_system.delete_file('conf/controllers', f"{controller_name}.yml")
-        return {"message": f"Configuration for controller '{controller_name}' deleted successfully"}
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=f"Configuration for controller '{controller_name}' not found")
-
-
-@router.get("/configs/", response_model=List[str])
-async def list_controller_configs():
-    """
-    List all controller configurations.
-    
-    Returns:
-        List of controller configuration names
-    """
-    return [f.replace('.yml', '') for f in file_system.list_files('conf/controllers') if f.endswith('.yml')]
 
 
 # Bot-specific controller config endpoints
@@ -264,7 +277,7 @@ async def get_bot_controller_configs(bot_name: str):
     configs = []
     for controller_file in file_system.list_files(bots_config_path):
         if controller_file.endswith('.yml'):
-            config = file_system.read_yaml_file(f"bots/{bots_config_path}/{controller_file}")
+            config = file_system.read_yaml_file(f"{bots_config_path}/{controller_file}")
             config['_config_name'] = controller_file.replace('.yml', '')
             configs.append(config)
     return configs
@@ -291,9 +304,9 @@ async def update_bot_controller_config(bot_name: str, controller_name: str, conf
         raise HTTPException(status_code=404, detail=f"Bot '{bot_name}' not found")
     
     try:
-        current_config = file_system.read_yaml_file(f"bots/{bots_config_path}/{controller_name}.yml")
+        current_config = file_system.read_yaml_file(f"{bots_config_path}/{controller_name}.yml")
         current_config.update(config)
-        file_system.dump_dict_to_yaml(f"bots/{bots_config_path}/{controller_name}.yml", current_config)
+        file_system.dump_dict_to_yaml(f"{bots_config_path}/{controller_name}.yml", current_config)
         return {"message": f"Controller configuration for bot '{bot_name}' updated successfully"}
     except FileNotFoundError:
         raise HTTPException(
