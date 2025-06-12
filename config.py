@@ -77,6 +77,12 @@ class AppSettings(BaseSettings):
         default="dev",
         description="Logfire environment name"
     )
+    
+    # Account state update interval
+    account_update_interval: int = Field(
+        default=5,
+        description="How often to update account states in minutes"
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

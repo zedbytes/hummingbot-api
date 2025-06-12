@@ -74,7 +74,9 @@ async def lifespan(app: FastAPI):
         broker_password=settings.broker.password
     )
     
-    accounts_service = AccountsService()
+    accounts_service = AccountsService(
+        account_update_interval=settings.app.account_update_interval
+    )
     docker_service = DockerService()
     bot_archiver = BotArchiver(
         settings.aws.api_key,
