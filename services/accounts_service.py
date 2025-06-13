@@ -6,7 +6,8 @@ from typing import Dict, List, Optional
 
 from fastapi import HTTPException
 from hummingbot.client.config.config_crypt import ETHKeyFileSecretManger
-from hummingbot.core.data_type.common import OrderType, TradeType
+from hummingbot.core.data_type.common import OrderType, TradeType, PositionAction
+from sqlalchemy import select
 
 from config import settings
 from database import AsyncDatabaseManager, AccountRepository, Order, Trade
@@ -527,7 +528,8 @@ class AccountsService:
     
     async def place_trade(self, account_name: str, connector_name: str, trading_pair: str, 
                          trade_type: TradeType, amount: Decimal, order_type: OrderType = OrderType.LIMIT, 
-                         price: Optional[Decimal] = None, market_data_manager = None) -> str:
+                         price: Optional[Decimal] = None, position_action: Optional[PositionAction] = None, 
+                         market_data_manager = None) -> str:
         """
         Place a trade using the specified account and connector.
         
@@ -576,21 +578,46 @@ class AccountsService:
                 price = Decimal("0")
         
         try:
+            # Check if this is a perpetual connector that needs position_action
+            is_perpetual = "_perpetual" in connector_name
+            
+            # Use default position action if not specified and it's a perpetual connector
+            if is_perpetual and position_action is None:
+                position_action = PositionAction.OPEN
+            
             # Place the order using the connector
             if trade_type == TradeType.BUY:
-                order_id = connector.buy(
-                    trading_pair=trading_pair,
-                    amount=amount,
-                    order_type=order_type,
-                    price=price or Decimal("0")
-                )
+                if is_perpetual:
+                    order_id = connector.buy(
+                        trading_pair=trading_pair,
+                        amount=amount,
+                        order_type=order_type,
+                        price=price or Decimal("0"),
+                        position_action=position_action
+                    )
+                else:
+                    order_id = connector.buy(
+                        trading_pair=trading_pair,
+                        amount=amount,
+                        order_type=order_type,
+                        price=price or Decimal("0")
+                    )
             else:
-                order_id = connector.sell(
-                    trading_pair=trading_pair,
-                    amount=amount,
-                    order_type=order_type,
-                    price=price or Decimal("0")
-                )
+                if is_perpetual:
+                    order_id = connector.sell(
+                        trading_pair=trading_pair,
+                        amount=amount,
+                        order_type=order_type,
+                        price=price or Decimal("0"),
+                        position_action=position_action
+                    )
+                else:
+                    order_id = connector.sell(
+                        trading_pair=trading_pair,
+                        amount=amount,
+                        order_type=order_type,
+                        price=price or Decimal("0")
+                    )
             
             # Wait briefly to check for immediate failures
             await asyncio.sleep(0.5)
@@ -683,31 +710,31 @@ class AccountsService:
         
         try:
             async with self.db_manager.get_session_context() as session:
-                query = session.query(Order)
+                query = select(Order)
                 
                 # Filter by account name if specified
                 if account_name:
-                    query = query.filter(Order.account_name == account_name)
+                    query = query.where(Order.account_name == account_name)
                 
                 # Filter by connector name if specified
                 if market:
-                    query = query.filter(Order.connector_name == market)
+                    query = query.where(Order.connector_name == market)
                 
                 # Filter by trading pair if specified  
                 if symbol:
-                    query = query.filter(Order.trading_pair == symbol)
+                    query = query.where(Order.trading_pair == symbol)
                 
                 # Filter by status if specified
                 if status:
-                    query = query.filter(Order.status == status)
+                    query = query.where(Order.status == status)
                 
                 # Filter by time range if specified
                 if start_time:
                     start_dt = datetime.fromtimestamp(start_time / 1000)  # Convert from milliseconds
-                    query = query.filter(Order.created_at >= start_dt)
+                    query = query.where(Order.created_at >= start_dt)
                 if end_time:
                     end_dt = datetime.fromtimestamp(end_time / 1000)  # Convert from milliseconds
-                    query = query.filter(Order.created_at <= end_dt)
+                    query = query.where(Order.created_at <= end_dt)
                 
                 query = query.order_by(Order.created_at.desc())
                 query = query.limit(limit).offset(offset)
@@ -749,21 +776,21 @@ class AccountsService:
         
         try:
             async with self.db_manager.get_session_context() as session:
-                query = session.query(Order).filter(
+                query = select(Order).where(
                     Order.status.in_(["SUBMITTED", "OPEN", "PARTIALLY_FILLED"])
                 )
                 
                 # Filter by account name if specified
                 if account_name:
-                    query = query.filter(Order.account_name == account_name)
+                    query = query.where(Order.account_name == account_name)
                 
                 # Filter by connector name if specified
                 if market:
-                    query = query.filter(Order.connector_name == market)
+                    query = query.where(Order.connector_name == market)
                 
                 # Filter by trading pair if specified  
                 if symbol:
-                    query = query.filter(Order.trading_pair == symbol)
+                    query = query.where(Order.trading_pair == symbol)
                 
                 query = query.order_by(Order.created_at.desc())
                 query = query.limit(1000)
@@ -833,31 +860,31 @@ class AccountsService:
         try:
             async with self.db_manager.get_session_context() as session:
                 # Join trades with orders to get account information
-                query = session.query(Trade).join(Order, Trade.order_id == Order.id)
+                query = select(Trade).join(Order, Trade.order_id == Order.id)
                 
                 # Filter by account name if specified
                 if account_name:
-                    query = query.filter(Order.account_name == account_name)
+                    query = query.where(Order.account_name == account_name)
                 
                 # Filter by connector name if specified
                 if market:
-                    query = query.filter(Order.connector_name == market)
+                    query = query.where(Order.connector_name == market)
                 
                 # Filter by trading pair if specified  
                 if symbol:
-                    query = query.filter(Trade.trading_pair == symbol)
+                    query = query.where(Trade.trading_pair == symbol)
                 
                 # Filter by trade type if specified
                 if trade_type:
-                    query = query.filter(Trade.trade_type == trade_type)
+                    query = query.where(Trade.trade_type == trade_type)
                 
                 # Filter by time range if specified
                 if start_time:
                     start_dt = datetime.fromtimestamp(start_time / 1000)  # Convert from milliseconds
-                    query = query.filter(Trade.timestamp >= start_dt)
+                    query = query.where(Trade.timestamp >= start_dt)
                 if end_time:
                     end_dt = datetime.fromtimestamp(end_time / 1000)  # Convert from milliseconds
-                    query = query.filter(Trade.timestamp <= end_dt)
+                    query = query.where(Trade.timestamp <= end_dt)
                 
                 query = query.order_by(Trade.timestamp.desc())
                 query = query.limit(limit).offset(offset)
