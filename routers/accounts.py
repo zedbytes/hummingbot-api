@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Depends, Query
@@ -7,8 +7,9 @@ from starlette import status
 
 from services.accounts_service import AccountsService
 from utils.file_system import FileSystemUtil
-from deps import get_accounts_service
+from deps import get_accounts_service, get_market_data_feed_manager
 from models import PaginatedResponse
+from models.bot import TradeRequest, TradeResponse
 
 router = APIRouter(tags=["Accounts"], prefix="/accounts")
 file_system = FileSystemUtil(base_path="bots/credentials")
@@ -82,18 +83,6 @@ async def get_connector_config_map(connector_name: str, accounts_service: Accoun
     return accounts_service.get_connector_config_map(connector_name)
 
 
-@router.get("/all-connectors-config-map", response_model=Dict[str, List[str]])
-async def get_all_connectors_config_map(accounts_service: AccountsService = Depends(get_accounts_service)):
-    """
-    Get configuration fields for all available connectors.
-    
-    Returns:
-        Dictionary mapping connector names to their required configuration fields
-    """
-    all_config_maps = {}
-    for connector in list(AllConnectorSettings.get_connector_settings().keys()):
-        all_config_maps[connector] = accounts_service.get_connector_config_map(connector)
-    return all_config_maps
 
 
 @router.get("/", response_model=List[str])
@@ -107,24 +96,6 @@ async def list_accounts(accounts_service: AccountsService = Depends(get_accounts
     return accounts_service.list_accounts()
 
 
-@router.get("/{account_name}/credentials", response_model=List[str])
-async def list_credentials(account_name: str, accounts_service: AccountsService = Depends(get_accounts_service)):
-    """
-    Get a list of all credentials (connectors) configured for a specific account.
-    
-    Args:
-        account_name: Name of the account to list credentials for
-        
-    Returns:
-        List of credential file names (connectors) configured for the account
-        
-    Raises:
-        HTTPException: 404 if account not found
-    """
-    try:
-        return accounts_service.list_credentials(account_name)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.post("/add-account", status_code=status.HTTP_201_CREATED)
@@ -165,7 +136,7 @@ async def delete_account(account_name: str, accounts_service: AccountsService = 
     try:
         if account_name == "master_account":
             raise HTTPException(status_code=400, detail="Cannot delete master account.")
-        accounts_service.delete_account(account_name)
+        await accounts_service.delete_account(account_name)
         return {"message": "Account deleted successfully."}
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -187,7 +158,7 @@ async def delete_credential(account_name: str, connector_name: str, accounts_ser
         HTTPException: 404 if credential not found
     """
     try:
-        accounts_service.delete_credentials(account_name, connector_name)
+        await accounts_service.delete_credentials(account_name, connector_name)
         return {"message": "Credential deleted successfully."}
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -213,7 +184,7 @@ async def add_credential(account_name: str, connector_name: str, credentials: Di
         await accounts_service.add_credentials(account_name, connector_name, credentials)
         return {"message": "Connector credentials added successfully."}
     except Exception as e:
-        accounts_service.delete_credentials(account_name, connector_name)
+        await accounts_service.delete_credentials(account_name, connector_name)
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -283,392 +254,473 @@ async def get_account_history(
         }
     )
 
-
-@router.get("/{account_name}/value", response_model=Dict)
-async def get_account_value(account_name: str, accounts_service: AccountsService = Depends(get_accounts_service)):
+# Trading endpoints
+@router.post("/trade", response_model=TradeResponse, status_code=status.HTTP_201_CREATED)
+async def place_trade(trade_request: TradeRequest, 
+                     accounts_service: AccountsService = Depends(get_accounts_service),
+                     market_data_manager = Depends(get_market_data_feed_manager)):
     """
-    Get total portfolio value for a specific account.
+    Place a buy or sell order using a specific account and connector.
     
     Args:
-        account_name: Name of the account to get value for
+        trade_request: Trading request with account, connector, trading pair, type, amount, etc.
+        accounts_service: Injected accounts service
         
     Returns:
-        Dictionary with account name and total value
+        TradeResponse with order ID and trading details
         
     Raises:
-        HTTPException: 404 if account not found
+        HTTPException: 400 for invalid parameters, 404 for account/connector not found, 500 for trade execution errors
     """
-    value_data = await accounts_service.get_portfolio_value(account_name)
-    if account_name not in value_data["accounts"]:
-        raise HTTPException(status_code=404, detail=f"Account '{account_name}' not found")
-    return {
-        "account_name": account_name,
-        "total_value": value_data["accounts"].get(account_name, 0)
-    }
-
-
-@router.get("/{account_name}/tokens", response_model=List[Dict])
-async def get_account_tokens(account_name: str, accounts_service: AccountsService = Depends(get_accounts_service)):
-    """
-    Get all tokens held by a specific account with aggregated information.
-    
-    Args:
-        account_name: Name of the account to get tokens for
+    try:
+        order_id = await accounts_service.place_trade(
+            account_name=trade_request.account_name,
+            connector_name=trade_request.connector_name,
+            trading_pair=trade_request.trading_pair,
+            trade_type=trade_request.trade_type,
+            amount=trade_request.amount,
+            order_type=trade_request.order_type,
+            price=trade_request.price,
+            market_data_manager=market_data_manager
+        )
         
-    Returns:
-        List of token information with total units, value, and connector breakdown
-        
-    Raises:
-        HTTPException: 404 if account not found
-    """
-    state = await accounts_service.get_account_current_state(account_name)
-    if not state:
-        raise HTTPException(status_code=404, detail=f"Account '{account_name}' not found")
-    
-    tokens = {}
-    for connector_name, token_list in state.items():
-        for token_info in token_list:
-            token = token_info["token"]
-            if token not in tokens:
-                tokens[token] = {
-                    "token": token,
-                    "total_units": 0,
-                    "total_value": 0,
-                    "average_price": 0,
-                    "connectors": []
-                }
-            tokens[token]["total_units"] += token_info["units"]
-            tokens[token]["total_value"] += token_info["value"]
-            tokens[token]["connectors"].append({
-                "connector": connector_name,
-                "units": token_info["units"],
-                "value": token_info["value"]
-            })
-    
-    # Calculate average price
-    for token_data in tokens.values():
-        if token_data["total_units"] > 0:
-            token_data["average_price"] = token_data["total_value"] / token_data["total_units"]
-    
-    return list(tokens.values())
+        return TradeResponse(
+            order_id=order_id,
+            account_name=trade_request.account_name,
+            connector_name=trade_request.connector_name,
+            trading_pair=trade_request.trading_pair,
+            trade_type=trade_request.trade_type,
+            amount=trade_request.amount,
+            order_type=trade_request.order_type,
+            price=trade_request.price,
+            status="submitted"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Unexpected error placing trade: {str(e)}")
 
 
-# Connector-specific routes
-@router.get("/{account_name}/connectors/{connector_name}/state", response_model=List[Dict])
-async def get_connector_state(account_name: str, connector_name: str, accounts_service: AccountsService = Depends(get_accounts_service)):
+@router.get("/{account_name}/connectors/{connector_name}/orders", response_model=Dict[str, Dict])
+async def get_active_orders(account_name: str, connector_name: str, accounts_service: AccountsService = Depends(get_accounts_service)):
     """
-    Get current state of a specific connector.
+    Get all active orders for a specific account and connector.
     
     Args:
         account_name: Name of the account
         connector_name: Name of the connector
+        accounts_service: Injected accounts service
         
     Returns:
-        List of token information for the specific connector
+        Dictionary mapping order IDs to order details
         
     Raises:
-        HTTPException: 404 if connector not found for account
+        HTTPException: 404 if account or connector not found
     """
-    state = await accounts_service.get_connector_current_state(account_name, connector_name)
-    if not state:
-        raise HTTPException(status_code=404, detail=f"Connector '{connector_name}' not found for account '{account_name}'")
-    return state
+    try:
+        return accounts_service.get_active_orders(account_name, connector_name)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving orders: {str(e)}")
 
 
-@router.get("/{account_name}/connectors/{connector_name}/state/history", response_model=PaginatedResponse)
-async def get_connector_history(
-    account_name: str,
-    connector_name: str,
-    limit: int = Query(default=100, ge=1, le=1000, description="Number of items per page"),
-    cursor: str = Query(default=None, description="Cursor for next page (ISO timestamp)"),
-    start_time: datetime = Query(default=None, description="Start time for filtering"),
-    end_time: datetime = Query(default=None, description="End time for filtering"),
+@router.post("/{account_name}/connectors/{connector_name}/orders/{client_order_id}/cancel")
+async def cancel_order(account_name: str, connector_name: str, client_order_id: str, 
+                      trading_pair: str = Query(..., description="Trading pair for the order to cancel"),
+                      accounts_service: AccountsService = Depends(get_accounts_service)):
+    """
+    Cancel a specific order by its client order ID.
+    
+    Args:
+        account_name: Name of the account
+        connector_name: Name of the connector
+        client_order_id: Client order ID to cancel
+        trading_pair: Trading pair for the order
+        accounts_service: Injected accounts service
+        
+    Returns:
+        Success message with cancelled order ID
+        
+    Raises:
+        HTTPException: 404 if account/connector not found, 500 for cancellation errors
+    """
+    try:
+        cancelled_order_id = await accounts_service.cancel_order(
+            account_name=account_name,
+            connector_name=connector_name,
+            trading_pair=trading_pair,
+            client_order_id=client_order_id
+        )
+        return {"message": f"Order {cancelled_order_id} cancelled successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error cancelling order: {str(e)}")
+
+
+@router.get("/{account_name}/connectors/{connector_name}/trading-rules/{trading_pair}")
+async def get_trading_rules(account_name: str, connector_name: str, trading_pair: str, 
+                           accounts_service: AccountsService = Depends(get_accounts_service)):
+    """
+    Get trading rules for a specific trading pair on a connector.
+    
+    Args:
+        account_name: Name of the account
+        connector_name: Name of the connector
+        trading_pair: Trading pair to get rules for
+        accounts_service: Injected accounts service
+        
+    Returns:
+        Trading rules including minimum order size, price increment, etc.
+        
+    Raises:
+        HTTPException: 404 if account/connector/trading pair not found
+    """
+    try:
+        connector = accounts_service.get_connector_instance(account_name, connector_name)
+        
+        if trading_pair not in connector.trading_rules:
+            raise HTTPException(status_code=404, detail=f"Trading pair '{trading_pair}' not found")
+        
+        trading_rule = connector.trading_rules[trading_pair]
+        return {
+            "trading_pair": trading_pair,
+            "min_order_size": float(trading_rule.min_order_size),
+            "max_order_size": float(trading_rule.max_order_size) if trading_rule.max_order_size else None,
+            "min_price_increment": float(trading_rule.min_price_increment),
+            "min_base_amount_increment": float(trading_rule.min_base_amount_increment),
+            "min_notional_size": float(trading_rule.min_notional_size),
+            "max_price_significant_digits": trading_rule.max_price_significant_digits,
+            "max_quantity_significant_digits": trading_rule.max_quantity_significant_digits,
+            "supports_limit_orders": trading_rule.supports_limit_orders,
+            "supports_market_orders": trading_rule.supports_market_orders,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving trading rules: {str(e)}")
+
+
+@router.get("/{account_name}/connectors/{connector_name}/supported-order-types")
+async def get_supported_order_types(account_name: str, connector_name: str, 
+                                   accounts_service: AccountsService = Depends(get_accounts_service)):
+    """
+    Get order types supported by a specific connector.
+    
+    Args:
+        account_name: Name of the account
+        connector_name: Name of the connector
+        accounts_service: Injected accounts service
+        
+    Returns:
+        List of supported order types (LIMIT, MARKET, LIMIT_MAKER)
+        
+    Raises:
+        HTTPException: 404 if account or connector not found
+    """
+    try:
+        connector = accounts_service.get_connector_instance(account_name, connector_name)
+        return [order_type.name for order_type in connector.supported_order_types()]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving order types: {str(e)}")
+
+
+# Global order/trade endpoints for all accounts
+@router.get("/orders", response_model=List[Dict])
+async def get_all_orders(
+    market: Optional[str] = Query(None, description="Filter by market/connector"),
+    symbol: Optional[str] = Query(None, description="Filter by trading pair"),
+    status: Optional[str] = Query(None, description="Filter by order status"),
+    start_time: Optional[int] = Query(None, description="Start timestamp in milliseconds"),
+    end_time: Optional[int] = Query(None, description="End timestamp in milliseconds"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of orders to return"),
+    offset: int = Query(0, ge=0, description="Number of orders to skip"),
     accounts_service: AccountsService = Depends(get_accounts_service)
 ):
     """
-    Get historical state of a specific connector with pagination.
+    Get order history across all accounts.
     
     Args:
-        account_name: Name of the account
-        connector_name: Name of the connector
-        limit: Number of items per page (1-1000)
-        cursor: Cursor for pagination (ISO timestamp)
-        start_time: Start time for filtering results
-        end_time: End time for filtering results
+        market: Optional filter by market/connector
+        symbol: Optional filter by trading pair
+        status: Optional filter by order status
+        start_time: Optional start timestamp
+        end_time: Optional end timestamp
+        limit: Maximum number of orders to return
+        offset: Number of orders to skip
         
     Returns:
-        Paginated response with historical connector state data
+        List of orders across all accounts
     """
-    data, next_cursor, has_more = await accounts_service.get_connector_state_history(
-        account_name=account_name,
-        connector_name=connector_name,
-        limit=limit,
-        cursor=cursor,
+    return await accounts_service.get_orders(
+        account_name=None,  # Query all accounts
+        market=market,
+        symbol=symbol,
+        status=status,
         start_time=start_time,
-        end_time=end_time
-    )
-    
-    return PaginatedResponse(
-        data=data,
-        pagination={
-            "limit": limit,
-            "has_more": has_more,
-            "next_cursor": next_cursor,
-            "current_cursor": cursor,
-            "filters": {
-                "account_name": account_name,
-                "connector_name": connector_name,
-                "start_time": start_time.isoformat() if start_time else None,
-                "end_time": end_time.isoformat() if end_time else None
-            }
-        }
+        end_time=end_time,
+        limit=limit,
+        offset=offset,
     )
 
 
-# Token-specific routes
-@router.get("/tokens", response_model=List[str])
-async def get_all_tokens(accounts_service: AccountsService = Depends(get_accounts_service)):
+@router.get("/orders/active", response_model=List[Dict])
+async def get_all_active_orders(
+    market: Optional[str] = Query(None, description="Filter by market/connector"),
+    symbol: Optional[str] = Query(None, description="Filter by trading pair"),
+    accounts_service: AccountsService = Depends(get_accounts_service)
+):
     """
-    Get all unique tokens across all accounts and connectors.
-    
-    Returns:
-        List of unique token symbols held across all accounts
-    """
-    return await accounts_service.get_all_unique_tokens()
-
-
-@router.get("/tokens/{token}/state", response_model=List[Dict])
-async def get_token_state(token: str, accounts_service: AccountsService = Depends(get_accounts_service)):
-    """
-    Get current state of a specific token across all accounts.
+    Get active orders across all accounts.
     
     Args:
-        token: Symbol of the token to get state for
+        market: Optional filter by market/connector
+        symbol: Optional filter by trading pair
         
     Returns:
-        List of token holdings across all accounts and connectors
-        
-    Raises:
-        HTTPException: 404 if token not found
+        List of active orders across all accounts
     """
-    state = await accounts_service.get_token_current_state(token)
-    if not state:
-        raise HTTPException(status_code=404, detail=f"Token '{token}' not found")
-    return state
+    return await accounts_service.get_active_orders_history(
+        account_name=None,  # Query all accounts
+        market=market,
+        symbol=symbol,
+    )
 
 
-@router.get("/tokens/{token}/accounts", response_model=List[Dict])
-async def get_token_accounts(token: str, accounts_service: AccountsService = Depends(get_accounts_service)):
+@router.get("/orders/summary", response_model=Dict)
+async def get_all_orders_summary(
+    start_time: Optional[int] = Query(None, description="Start timestamp in milliseconds"),
+    end_time: Optional[int] = Query(None, description="End timestamp in milliseconds"),
+    accounts_service: AccountsService = Depends(get_accounts_service)
+):
     """
-    Get all accounts that hold a specific token with aggregated information.
+    Get order summary statistics across all accounts.
     
     Args:
-        token: Symbol of the token to search for
+        start_time: Optional start timestamp
+        end_time: Optional end timestamp
         
     Returns:
-        List of accounts holding the token with total units, value, and connector breakdown
+        Order summary statistics including fill rate, volumes, etc.
+    """
+    return await accounts_service.get_orders_summary(
+        account_name=None,  # Query all accounts
+        start_time=start_time,
+        end_time=end_time,
+    )
+
+
+@router.get("/trades", response_model=List[Dict])
+async def get_all_trades(
+    market: Optional[str] = Query(None, description="Filter by market/connector"),
+    symbol: Optional[str] = Query(None, description="Filter by trading pair"),
+    trade_type: Optional[str] = Query(None, description="Filter by trade type (BUY/SELL)"),
+    start_time: Optional[int] = Query(None, description="Start timestamp in milliseconds"),
+    end_time: Optional[int] = Query(None, description="End timestamp in milliseconds"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of trades to return"),
+    offset: int = Query(0, ge=0, description="Number of trades to skip"),
+    accounts_service: AccountsService = Depends(get_accounts_service)
+):
+    """
+    Get trade history across all accounts.
+    
+    Args:
+        market: Optional filter by market/connector
+        symbol: Optional filter by trading pair
+        trade_type: Optional filter by trade type
+        start_time: Optional start timestamp
+        end_time: Optional end timestamp
+        limit: Maximum number of trades to return
+        offset: Number of trades to skip
         
-    Raises:
-        HTTPException: 404 if token not found
+    Returns:
+        List of trades across all accounts
     """
-    token_states = await accounts_service.get_token_current_state(token)
-    if not token_states:
-        raise HTTPException(status_code=404, detail=f"Token '{token}' not found")
-    
-    accounts = {}
-    for state in token_states:
-        account_name = state["account_name"]
-        if account_name not in accounts:
-            accounts[account_name] = {
-                "account_name": account_name,
-                "total_units": 0,
-                "total_value": 0,
-                "connectors": []
-            }
-        accounts[account_name]["total_units"] += state["units"]
-        accounts[account_name]["total_value"] += state["value"]
-        accounts[account_name]["connectors"].append({
-            "connector_name": state["connector_name"],
-            "units": state["units"],
-            "value": state["value"]
-        })
-    
-    return list(accounts.values())
+    return await accounts_service.get_trades(
+        account_name=None,  # Query all accounts
+        market=market,
+        symbol=symbol,
+        trade_type=trade_type,
+        start_time=start_time,
+        end_time=end_time,
+        limit=limit,
+        offset=offset,
+    )
 
 
-@router.get("/{account_name}/tokens/{token}", response_model=Dict)
-async def get_account_token_state(account_name: str, token: str, accounts_service: AccountsService = Depends(get_accounts_service)):
+# Order history endpoints integrated with accounts
+@router.get("/{account_name}/orders", response_model=List[Dict])
+async def get_account_orders(
+    account_name: str,
+    connector_name: Optional[str] = Query(None, description="Filter by connector"),
+    trading_pair: Optional[str] = Query(None, description="Filter by trading pair"),
+    status: Optional[str] = Query(None, description="Filter by order status"),
+    start_time: Optional[int] = Query(None, description="Start timestamp in milliseconds"),
+    end_time: Optional[int] = Query(None, description="End timestamp in milliseconds"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of orders to return"),
+    offset: int = Query(0, ge=0, description="Number of orders to skip"),
+    accounts_service: AccountsService = Depends(get_accounts_service)
+):
     """
-    Get state of a specific token for a specific account.
+    Get order history for a specific account.
     
     Args:
         account_name: Name of the account
-        token: Symbol of the token to get state for
+        connector_name: Optional filter by connector
+        trading_pair: Optional filter by trading pair
+        status: Optional filter by order status
+        start_time: Optional start timestamp
+        end_time: Optional end timestamp
+        limit: Maximum number of orders to return
+        offset: Number of orders to skip
         
     Returns:
-        Token information including total units, value, and connector breakdown
+        List of orders for the account
         
     Raises:
-        HTTPException: 404 if account or token not found
+        HTTPException: 404 if account not found
     """
+    # Verify account exists
     state = await accounts_service.get_account_current_state(account_name)
     if not state:
         raise HTTPException(status_code=404, detail=f"Account '{account_name}' not found")
     
-    token_data = {
-        "token": token,
-        "account_name": account_name,
-        "total_units": 0,
-        "total_value": 0,
-        "connectors": []
-    }
+    # Get orders from accounts service (will be implemented)
+    orders = await accounts_service.get_orders(
+        account_name=account_name,
+        market=connector_name,
+        symbol=trading_pair,
+        status=status,
+        start_time=start_time,
+        end_time=end_time,
+        limit=limit,
+        offset=offset,
+    )
     
-    for connector_name, token_list in state.items():
-        for token_info in token_list:
-            if token_info["token"] == token:
-                token_data["total_units"] += token_info["units"]
-                token_data["total_value"] += token_info["value"]
-                token_data["connectors"].append({
-                    "connector_name": connector_name,
-                    "units": token_info["units"],
-                    "value": token_info["value"],
-                    "price": token_info["price"],
-                    "available_units": token_info["available_units"]
-                })
-    
-    if not token_data["connectors"]:
-        raise HTTPException(status_code=404, detail=f"Token '{token}' not found for account '{account_name}'")
-    
-    return token_data
+    return orders
 
 
-# Portfolio aggregation routes
-@router.get("/portfolio/value", response_model=Dict)
-async def get_portfolio_value(accounts_service: AccountsService = Depends(get_accounts_service)):
+@router.get("/{account_name}/orders/active", response_model=List[Dict])
+async def get_account_active_orders(
+    account_name: str,
+    connector_name: Optional[str] = Query(None, description="Filter by connector"),
+    trading_pair: Optional[str] = Query(None, description="Filter by trading pair"),
+    accounts_service: AccountsService = Depends(get_accounts_service)
+):
     """
-    Get total portfolio value across all accounts.
+    Get active orders for a specific account.
     
+    Args:
+        account_name: Name of the account
+        connector_name: Optional filter by connector
+        trading_pair: Optional filter by trading pair
+        
     Returns:
-        Dictionary with total portfolio value and breakdown by account
+        List of active orders
+        
+    Raises:
+        HTTPException: 404 if account not found
     """
-    return await accounts_service.get_portfolio_value()
-
-
-@router.get("/portfolio/tokens", response_model=List[Dict])
-async def get_portfolio_tokens(accounts_service: AccountsService = Depends(get_accounts_service)):
-    """
-    Get all tokens with aggregated holdings across all accounts.
+    # Verify account exists
+    state = await accounts_service.get_account_current_state(account_name)
+    if not state:
+        raise HTTPException(status_code=404, detail=f"Account '{account_name}' not found")
     
+    # Get active orders from accounts service (will be implemented)
+    orders = await accounts_service.get_active_orders_history(
+        account_name=account_name,
+        market=connector_name,
+        symbol=trading_pair,
+    )
+    
+    return orders
+
+
+@router.get("/{account_name}/orders/summary", response_model=Dict)
+async def get_account_orders_summary(
+    account_name: str,
+    start_time: Optional[int] = Query(None, description="Start timestamp in milliseconds"),
+    end_time: Optional[int] = Query(None, description="End timestamp in milliseconds"),
+    accounts_service: AccountsService = Depends(get_accounts_service)
+):
+    """
+    Get order summary statistics for a specific account.
+    
+    Args:
+        account_name: Name of the account
+        start_time: Optional start timestamp
+        end_time: Optional end timestamp
+        
     Returns:
-        List of tokens with total units, value, average price, and account breakdown
+        Order summary statistics including fill rate, volumes, etc.
+        
+    Raises:
+        HTTPException: 404 if account not found
     """
-    all_states = accounts_service.get_accounts_state()
+    # Verify account exists
+    state = await accounts_service.get_account_current_state(account_name)
+    if not state:
+        raise HTTPException(status_code=404, detail=f"Account '{account_name}' not found")
     
-    tokens = {}
-    for account_name, connectors in all_states.items():
-        for connector_name, token_list in connectors.items():
-            for token_info in token_list:
-                token = token_info["token"]
-                if token not in tokens:
-                    tokens[token] = {
-                        "token": token,
-                        "total_units": 0,
-                        "total_value": 0,
-                        "accounts": {}
-                    }
-                tokens[token]["total_units"] += token_info["units"]
-                tokens[token]["total_value"] += token_info["value"]
-                
-                if account_name not in tokens[token]["accounts"]:
-                    tokens[token]["accounts"][account_name] = {
-                        "units": 0,
-                        "value": 0
-                    }
-                tokens[token]["accounts"][account_name]["units"] += token_info["units"]
-                tokens[token]["accounts"][account_name]["value"] += token_info["value"]
+    # Get summary from accounts service (will be implemented)
+    summary = await accounts_service.get_orders_summary(
+        account_name=account_name,
+        start_time=start_time,
+        end_time=end_time,
+    )
     
-    # Convert accounts dict to list for response
-    result = []
-    for token, data in tokens.items():
-        token_data = {
-            "token": token,
-            "total_units": data["total_units"],
-            "total_value": data["total_value"],
-            "average_price": data["total_value"] / data["total_units"] if data["total_units"] > 0 else 0,
-            "accounts": [
-                {
-                    "account_name": acc_name,
-                    "units": acc_data["units"],
-                    "value": acc_data["value"]
-                }
-                for acc_name, acc_data in data["accounts"].items()
-            ]
-        }
-        result.append(token_data)
-    
-    # Sort by total value descending
-    result.sort(key=lambda x: x["total_value"], reverse=True)
-    
-    return result
+    return summary
 
 
-@router.get("/portfolio/distribution", response_model=Dict)
-async def get_portfolio_distribution(accounts_service: AccountsService = Depends(get_accounts_service)):
+@router.get("/{account_name}/trades", response_model=List[Dict])
+async def get_account_trades(
+    account_name: str,
+    connector_name: Optional[str] = Query(None, description="Filter by connector"),
+    trading_pair: Optional[str] = Query(None, description="Filter by trading pair"),
+    trade_type: Optional[str] = Query(None, description="Filter by trade type (BUY/SELL)"),
+    start_time: Optional[int] = Query(None, description="Start timestamp in milliseconds"),
+    end_time: Optional[int] = Query(None, description="End timestamp in milliseconds"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of trades to return"),
+    offset: int = Query(0, ge=0, description="Number of trades to skip"),
+    accounts_service: AccountsService = Depends(get_accounts_service)
+):
     """
-    Get portfolio distribution by token, exchange, and account.
+    Get trade history for a specific account.
     
+    Args:
+        account_name: Name of the account
+        connector_name: Optional filter by connector
+        trading_pair: Optional filter by trading pair
+        trade_type: Optional filter by trade type
+        start_time: Optional start timestamp
+        end_time: Optional end timestamp
+        limit: Maximum number of trades to return
+        offset: Number of trades to skip
+        
     Returns:
-        Dictionary with total value and percentage breakdowns by token, exchange, and account
+        List of trades for the account
+        
+    Raises:
+        HTTPException: 404 if account not found
     """
-    all_states = accounts_service.get_accounts_state()
-    portfolio_value = await accounts_service.get_portfolio_value()
-    total_value = portfolio_value["total_value"]
+    # Verify account exists
+    state = await accounts_service.get_account_current_state(account_name)
+    if not state:
+        raise HTTPException(status_code=404, detail=f"Account '{account_name}' not found")
     
-    if total_value == 0:
-        return {
-            "total_value": 0,
-            "by_token": {},
-            "by_exchange": {},
-            "by_account": {}
-        }
+    # Get trades from accounts service (will be implemented)
+    trades = await accounts_service.get_trades(
+        account_name=account_name,
+        market=connector_name,
+        symbol=trading_pair,
+        trade_type=trade_type,
+        start_time=start_time,
+        end_time=end_time,
+        limit=limit,
+        offset=offset,
+    )
     
-    # Distribution by token
-    by_token = {}
-    by_exchange = {}
-    
-    for account_name, connectors in all_states.items():
-        for connector_name, token_list in connectors.items():
-            if connector_name not in by_exchange:
-                by_exchange[connector_name] = {"value": 0, "percentage": 0}
-            
-            for token_info in token_list:
-                token = token_info["token"]
-                value = token_info["value"]
-                
-                if token not in by_token:
-                    by_token[token] = {"value": 0, "percentage": 0}
-                
-                by_token[token]["value"] += value
-                by_exchange[connector_name]["value"] += value
-    
-    # Calculate percentages
-    for token_data in by_token.values():
-        token_data["percentage"] = (token_data["value"] / total_value) * 100
-    
-    for exchange_data in by_exchange.values():
-        exchange_data["percentage"] = (exchange_data["value"] / total_value) * 100
-    
-    # Account distribution from portfolio value
-    by_account = {}
-    for account_name, value in portfolio_value["accounts"].items():
-        by_account[account_name] = {
-            "value": value,
-            "percentage": (value / total_value) * 100 if total_value > 0 else 0
-        }
-    
-    return {
-        "total_value": total_value,
-        "by_token": by_token,
-        "by_exchange": by_exchange,
-        "by_account": by_account
-    }
+    return trades
