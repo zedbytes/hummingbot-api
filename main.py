@@ -105,15 +105,15 @@ async def lifespan(app: FastAPI):
     app.state.market_data_feed_manager = market_data_feed_manager
     
     # Start services
-    bots_orchestrator.start_update_active_bots_loop()
-    accounts_service.start_update_account_state_loop()
+    bots_orchestrator.start()
+    accounts_service.start()
     market_data_feed_manager.start()
     
     yield
     
     # Shutdown services
-    bots_orchestrator.stop_update_active_bots_loop()
-    accounts_service.stop_update_account_state_loop()
+    bots_orchestrator.stop()
+    await accounts_service.stop()
     
     # Stop market data feed manager (which will stop all feeds)
     market_data_feed_manager.stop()
