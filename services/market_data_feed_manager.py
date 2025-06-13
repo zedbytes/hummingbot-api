@@ -1,8 +1,9 @@
 import asyncio
 import time
-from typing import Dict, Optional, Any, Callable
+from typing import Dict, Optional, Any, Callable, List, Set
 import logging
 from enum import Enum
+from decimal import Decimal
 
 from hummingbot.data_feed.candles_feed.data_types import CandlesConfig
 from hummingbot.data_feed.market_data_provider import MarketDataProvider
@@ -167,6 +168,153 @@ class MarketDataFeedManager:
         
         self.logger.debug(f"Accessed order book snapshot: {feed_key}")
         return snapshot
+    
+    async def get_trading_rules(self, connector_name: str, trading_pairs: Optional[List[str]] = None) -> Dict[str, Dict]:
+        """
+        Get trading rules for specified trading pairs from a connector.
+        
+        Args:
+            connector_name: Name of the connector
+            trading_pairs: List of trading pairs to get rules for. If None, get all available.
+            
+        Returns:
+            Dictionary mapping trading pairs to their trading rules
+        """
+        try:
+            # Access connector through MarketDataProvider's _rate_sources LazyDict
+            connector = self.market_data_provider._rate_sources[connector_name]
+            
+            # Update trading rules to ensure we have the latest data
+            await connector._update_trading_rules()
+            
+            # Get trading rules
+            if trading_pairs:
+                # Get rules for specific trading pairs
+                result = {}
+                for trading_pair in trading_pairs:
+                    if trading_pair in connector.trading_rules:
+                        rule = connector.trading_rules[trading_pair]
+                        result[trading_pair] = {
+                            "min_order_size": float(rule.min_order_size),
+                            "max_order_size": float(rule.max_order_size) if rule.max_order_size else None,
+                            "min_price_increment": float(rule.min_price_increment),
+                            "min_base_amount_increment": float(rule.min_base_amount_increment),
+                            "min_notional_size": float(rule.min_notional_size),
+                            "max_price_significant_digits": rule.max_price_significant_digits,
+                            "max_quantity_significant_digits": rule.max_quantity_significant_digits,
+                            "supports_limit_orders": rule.supports_limit_orders,
+                            "supports_market_orders": rule.supports_market_orders,
+                        }
+                    else:
+                        result[trading_pair] = {"error": f"Trading pair {trading_pair} not found"}
+            else:
+                # Get all trading rules
+                result = {}
+                for trading_pair, rule in connector.trading_rules.items():
+                    result[trading_pair] = {
+                        "min_order_size": float(rule.min_order_size),
+                        "max_order_size": float(rule.max_order_size) if rule.max_order_size else None,
+                        "min_price_increment": float(rule.min_price_increment),
+                        "min_base_amount_increment": float(rule.min_base_amount_increment),
+                        "min_notional_size": float(rule.min_notional_size),
+                        "max_price_significant_digits": rule.max_price_significant_digits,
+                        "max_quantity_significant_digits": rule.max_quantity_significant_digits,
+                        "supports_limit_orders": rule.supports_limit_orders,
+                        "supports_market_orders": rule.supports_market_orders,
+                    }
+            
+            self.logger.debug(f"Retrieved trading rules for {connector_name}: {len(result)} pairs")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error getting trading rules for {connector_name}: {e}")
+            return {"error": str(e)}
+    
+    async def get_prices(self, connector_name: str, trading_pairs: List[str]) -> Dict[str, float]:
+        """
+        Get current prices for specified trading pairs.
+        
+        Args:
+            connector_name: Name of the connector
+            trading_pairs: List of trading pairs to get prices for
+            
+        Returns:
+            Dictionary mapping trading pairs to their current prices
+        """
+        try:
+            # Access connector through MarketDataProvider's _rate_sources LazyDict
+            connector = self.market_data_provider._rate_sources[connector_name]
+            
+            # Get last traded prices
+            prices = await connector.get_last_traded_prices(trading_pairs)
+            
+            # Convert Decimal to float for JSON serialization
+            result = {pair: float(price) for pair, price in prices.items()}
+            
+            self.logger.debug(f"Retrieved prices for {connector_name}: {len(result)} pairs")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error getting prices for {connector_name}: {e}")
+            return {"error": str(e)}
+    
+    def get_order_book_data(self, connector_name: str, trading_pair: str, depth: int = 10) -> Dict:
+        """
+        Get order book data using the connector's order book data source.
+        
+        Args:
+            connector_name: Name of the connector
+            trading_pair: Trading pair to get order book for
+            depth: Number of bid/ask levels to return
+            
+        Returns:
+            Dictionary containing bid and ask data
+        """
+        try:
+            # Access connector through MarketDataProvider's _rate_sources LazyDict
+            connector = self.market_data_provider._rate_sources[connector_name]
+            
+            # Access the order book data source
+            if hasattr(connector, '_orderbook_ds') and connector._orderbook_ds:
+                orderbook_ds = connector._orderbook_ds
+                
+                # Check if the trading pair is available in the order book data source
+                if trading_pair in orderbook_ds:
+                    orderbook = orderbook_ds[trading_pair]
+                    
+                    # Get bid and ask data
+                    bids = []
+                    asks = []
+                    
+                    # Get top bids (highest prices first)
+                    for i, (price, amount) in enumerate(orderbook.bid_entries()):
+                        if i >= depth:
+                            break
+                        bids.append({"price": float(price), "amount": float(amount)})
+                    
+                    # Get top asks (lowest prices first) 
+                    for i, (price, amount) in enumerate(orderbook.ask_entries()):
+                        if i >= depth:
+                            break
+                        asks.append({"price": float(price), "amount": float(amount)})
+                    
+                    result = {
+                        "trading_pair": trading_pair,
+                        "bids": bids,
+                        "asks": asks,
+                        "timestamp": time.time()
+                    }
+                    
+                    self.logger.debug(f"Retrieved order book for {connector_name}/{trading_pair}")
+                    return result
+                else:
+                    return {"error": f"Trading pair {trading_pair} not found in order book data source"}
+            else:
+                return {"error": f"Order book data source not available for {connector_name}"}
+                
+        except Exception as e:
+            self.logger.error(f"Error getting order book for {connector_name}/{trading_pair}: {e}")
+            return {"error": str(e)}
     
     async def _cleanup_loop(self):
         """Background task that periodically cleans up unused feeds."""
