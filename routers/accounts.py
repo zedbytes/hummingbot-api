@@ -281,6 +281,7 @@ async def place_trade(trade_request: TradeRequest,
             amount=trade_request.amount,
             order_type=trade_request.order_type,
             price=trade_request.price,
+            position_action=trade_request.position_action,
             market_data_manager=market_data_manager
         )
         
