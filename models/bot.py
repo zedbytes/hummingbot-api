@@ -2,7 +2,7 @@ from typing import Any, Dict, Optional
 from pydantic import BaseModel, Field
 from enum import Enum
 from decimal import Decimal
-from hummingbot.core.data_type.common import OrderType, TradeType
+from hummingbot.core.data_type.common import OrderType, TradeType, PositionAction
 
 
 class ControllerType(str, Enum):
@@ -56,6 +56,7 @@ class TradeRequest(BaseModel):
     amount: Decimal = Field(description="Amount to trade", gt=0)
     order_type: OrderType = Field(default=OrderType.LIMIT, description="Type of order")
     price: Optional[Decimal] = Field(default=None, description="Price for limit orders")
+    position_action: Optional[PositionAction] = Field(default=PositionAction.OPEN, description="Position action for perpetual contracts (OPEN/CLOSE)")
 
 
 class TradeResponse(BaseModel):

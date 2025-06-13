@@ -1,24 +1,33 @@
+import asyncio
 import logging
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 from hummingbot.client.config.client_config_map import ClientConfigMap
 from hummingbot.client.config.config_crypt import ETHKeyFileSecretManger
 from hummingbot.client.config.config_helpers import ClientConfigAdapter, ReadOnlyClientConfigAdapter, get_connector_class
 from hummingbot.client.settings import AllConnectorSettings
+from hummingbot.connector.connector_base import ConnectorBase
+from hummingbot.connector.exchange_base import ExchangeBase
+from hummingbot.connector.exchange_py_base import ExchangePyBase
+from hummingbot.core.utils.async_utils import safe_ensure_future
 
 from utils.backend_api_config_adapter import BackendAPIConfigAdapter
 from utils.security import BackendAPISecurity
+from utils.file_system import FileSystemUtil
 
 
 class ConnectorManager:
     """
     Manages the creation and caching of exchange connectors.
     Handles connector configuration and initialization.
+    This is the single source of truth for all connector instances.
     """
     
     def __init__(self, secrets_manager: ETHKeyFileSecretManger):
         self.secrets_manager = secrets_manager
-        self._connector_cache: Dict[str, Dict[str, any]] = {}
+        self._connector_cache: Dict[str, ConnectorBase] = {}
+        self._orders_recorders: Dict[str, any] = {}
+        self._file_system = FileSystemUtil()
     
     def get_connector(self, account_name: str, connector_name: str):
         """
@@ -122,3 +131,165 @@ class ConnectorManager:
         await new_connector._update_balances()
         
         return new_connector
+    
+    def list_account_connectors(self, account_name: str) -> List[str]:
+        """
+        List all initialized connectors for a specific account.
+        
+        :param account_name: The name of the account.
+        :return: List of connector names.
+        """
+        connectors = []
+        for cache_key in self._connector_cache.keys():
+            acc_name, conn_name = cache_key.split(":", 1)
+            if acc_name == account_name:
+                connectors.append(conn_name)
+        return connectors
+    
+    def get_all_connectors(self) -> Dict[str, Dict[str, ConnectorBase]]:
+        """
+        Get all connectors organized by account.
+        
+        :return: Dictionary mapping account names to their connectors.
+        """
+        result = {}
+        for cache_key, connector in self._connector_cache.items():
+            account_name, connector_name = cache_key.split(":", 1)
+            if account_name not in result:
+                result[account_name] = {}
+            result[account_name][connector_name] = connector
+        return result
+    
+    def is_connector_initialized(self, account_name: str, connector_name: str) -> bool:
+        """
+        Check if a connector is already initialized and cached.
+        
+        :param account_name: The name of the account.
+        :param connector_name: The name of the connector.
+        :return: True if the connector is initialized, False otherwise.
+        """
+        cache_key = f"{account_name}:{connector_name}"
+        return cache_key in self._connector_cache
+    
+    def get_connector_state(self, account_name: str, connector_name: str) -> Dict[str, any]:
+        """
+        Get the current state of a connector (balances, trading rules, etc).
+        
+        :param account_name: The name of the account.
+        :param connector_name: The name of the connector.
+        :return: Dictionary containing connector state information.
+        """
+        connector = self.get_connector(account_name, connector_name)
+        
+        return {
+            "balances": {k: float(v) for k, v in connector.get_all_balances().items()},
+            "available_balances": {k: float(connector.get_available_balance(k)) 
+                                 for k in connector.get_all_balances().keys()},
+            "is_ready": connector.ready,
+            "name": connector.name,
+            "trading_required": connector.is_trading_required
+        }
+    
+    async def initialize_connector_with_tracking(self, account_name: str, connector_name: str, db_manager=None) -> ConnectorBase:
+        """
+        Initialize a connector with order tracking infrastructure.
+        This includes creating the connector, starting its network, and setting up order recording.
+        
+        :param account_name: The name of the account.
+        :param connector_name: The name of the connector.
+        :param db_manager: Database manager for order recording (optional).
+        :return: The initialized connector instance.
+        """
+        # Get or create the connector
+        connector = self.get_connector(account_name, connector_name)
+        
+        # Start order tracking if db_manager provided
+        if db_manager:
+            cache_key = f"{account_name}:{connector_name}"
+            if cache_key not in self._orders_recorders:
+                # Import OrdersRecorder dynamically to avoid circular imports
+                from services.orders_recorder import OrdersRecorder
+                
+                # Create and start orders recorder
+                orders_recorder = OrdersRecorder(db_manager, account_name, connector_name)
+                orders_recorder.start(connector)
+                self._orders_recorders[cache_key] = orders_recorder
+        
+        # Start the connector's network without order book tracker
+        self._start_network_without_order_book(connector)
+        
+        # Update initial balances
+        await connector._update_balances()
+        
+        logging.info(f"Initialized connector {connector_name} for account {account_name} with tracking")
+        return connector
+    
+    def _start_network_without_order_book(self, connector: ExchangePyBase):
+        """
+        Start connector network tasks except the order book tracker.
+        This avoids issues when there are no trading pairs configured.
+        """
+        try:
+            # Start only the essential polling tasks if trading is required
+            connector._trading_rules_polling_task = safe_ensure_future(connector._trading_rules_polling_loop())
+            connector._trading_fees_polling_task = safe_ensure_future(connector._trading_fees_polling_loop())
+            connector._status_polling_task = safe_ensure_future(connector._status_polling_loop())
+            connector._user_stream_tracker_task = connector._create_user_stream_tracker_task()
+            connector._user_stream_event_listener_task = safe_ensure_future(connector._user_stream_event_listener())
+            connector._lost_orders_update_task = safe_ensure_future(connector._lost_orders_update_polling_loop())
+                
+            logging.info(f"Started connector network without order book tracker")
+            
+        except Exception as e:
+            logging.error(f"Error starting connector network without order book: {e}")
+    
+    async def stop_connector(self, account_name: str, connector_name: str):
+        """
+        Stop a connector and its associated services.
+        
+        :param account_name: The name of the account.
+        :param connector_name: The name of the connector.
+        """
+        cache_key = f"{account_name}:{connector_name}"
+        
+        # Stop order recorder if exists
+        if cache_key in self._orders_recorders:
+            try:
+                await self._orders_recorders[cache_key].stop()
+                del self._orders_recorders[cache_key]
+                logging.info(f"Stopped order recorder for {account_name}/{connector_name}")
+            except Exception as e:
+                logging.error(f"Error stopping order recorder for {account_name}/{connector_name}: {e}")
+        
+        # Stop connector network if exists
+        if cache_key in self._connector_cache:
+            try:
+                connector = self._connector_cache[cache_key]
+                await connector.stop_network()
+                logging.info(f"Stopped connector network for {account_name}/{connector_name}")
+            except Exception as e:
+                logging.error(f"Error stopping connector network for {account_name}/{connector_name}: {e}")
+    
+    async def stop_all_connectors(self):
+        """
+        Stop all connectors and their associated services.
+        """
+        # Get all account/connector pairs
+        pairs = [(k.split(":", 1)[0], k.split(":", 1)[1]) for k in self._connector_cache.keys()]
+        
+        # Stop each connector
+        for account_name, connector_name in pairs:
+            await self.stop_connector(account_name, connector_name)
+    
+    def list_available_credentials(self, account_name: str) -> List[str]:
+        """
+        List all available connector credentials for an account.
+        
+        :param account_name: The name of the account.
+        :return: List of connector names that have credentials.
+        """
+        try:
+            files = self._file_system.list_files(f'credentials/{account_name}/connectors')
+            return [file.replace('.yml', '') for file in files if file.endswith('.yml')]
+        except FileNotFoundError:
+            return []
