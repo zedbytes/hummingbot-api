@@ -44,10 +44,29 @@ class AsyncDatabaseManager:
         try:
             async with self.engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
+                
+                # Drop Hummingbot's native tables since we use our custom orders/trades tables
+                await self._drop_hummingbot_tables(conn)
+                
             logger.info("Database tables created successfully")
         except Exception as e:
             logger.error(f"Failed to create database tables: {e}")
             raise
+    
+    async def _drop_hummingbot_tables(self, conn):
+        """Drop Hummingbot's native database tables since we use custom ones."""
+        hummingbot_tables = [
+            "hummingbot_orders",
+            "hummingbot_trade_fills", 
+            "hummingbot_order_status"
+        ]
+        
+        for table_name in hummingbot_tables:
+            try:
+                await conn.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
+                logger.info(f"Dropped Hummingbot table: {table_name}")
+            except Exception as e:
+                logger.debug(f"Could not drop table {table_name}: {e}")  # Use debug since table might not exist
             
     async def close(self):
         """Close all database connections."""
