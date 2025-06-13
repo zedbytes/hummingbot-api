@@ -2,6 +2,7 @@ from fastapi import Request
 from services.bots_orchestrator import BotsOrchestrator
 from services.accounts_service import AccountsService
 from services.docker_service import DockerService
+from services.market_data_feed_manager import MarketDataFeedManager
 from utils.bot_archiver import BotArchiver
 
 
@@ -18,6 +19,11 @@ def get_accounts_service(request: Request) -> AccountsService:
 def get_docker_service(request: Request) -> DockerService:
     """Get DockerService from app state."""
     return request.app.state.docker_service
+
+
+def get_market_data_feed_manager(request: Request) -> MarketDataFeedManager:
+    """Get MarketDataFeedManager from app state."""
+    return request.app.state.market_data_feed_manager
 
 
 def get_bot_archiver(request: Request) -> BotArchiver:
