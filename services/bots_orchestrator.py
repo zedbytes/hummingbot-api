@@ -53,7 +53,7 @@ class BotsOrchestrator:
             if container.status == "running" and self.hummingbot_containers_fiter(container)
         ]
 
-    def start_update_active_bots_loop(self):
+    def start(self):
         """Start the loop that monitors active bots."""
         # Start MQTT manager and update loop in async context
         self._update_bots_task = asyncio.create_task(self._start_async())
@@ -66,7 +66,7 @@ class BotsOrchestrator:
         # Then start the update loop
         await self.update_active_bots()
 
-    def stop_update_active_bots_loop(self):
+    def stop(self):
         """Stop the active bots monitoring loop."""
         if self._update_bots_task:
             self._update_bots_task.cancel()
