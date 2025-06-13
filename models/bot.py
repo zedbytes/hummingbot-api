@@ -1,6 +1,8 @@
 from typing import Any, Dict, Optional
 from pydantic import BaseModel, Field
 from enum import Enum
+from decimal import Decimal
+from hummingbot.core.data_type.common import OrderType, TradeType
 
 
 class ControllerType(str, Enum):
@@ -43,6 +45,30 @@ class Controller(TypedFileContent):
 class ControllerConfig(ConfigContent):
     """Controller configuration content"""
     pass
+
+
+class TradeRequest(BaseModel):
+    """Request model for placing trades"""
+    account_name: str = Field(description="Name of the account to trade with")
+    connector_name: str = Field(description="Name of the connector/exchange")
+    trading_pair: str = Field(description="Trading pair (e.g., BTC-USDT)")
+    trade_type: TradeType = Field(description="Whether to buy or sell")
+    amount: Decimal = Field(description="Amount to trade", gt=0)
+    order_type: OrderType = Field(default=OrderType.LIMIT, description="Type of order")
+    price: Optional[Decimal] = Field(default=None, description="Price for limit orders")
+
+
+class TradeResponse(BaseModel):
+    """Response model for trade execution"""
+    order_id: str = Field(description="Client order ID assigned by the connector")
+    account_name: str = Field(description="Account used for the trade")
+    connector_name: str = Field(description="Connector used for the trade")
+    trading_pair: str = Field(description="Trading pair")
+    trade_type: TradeType = Field(description="Trade type")
+    amount: Decimal = Field(description="Trade amount")
+    order_type: OrderType = Field(description="Order type")
+    price: Optional[Decimal] = Field(description="Order price")
+    status: str = Field(default="submitted", description="Order status")
 
 
 class BotAction(BaseModel):
