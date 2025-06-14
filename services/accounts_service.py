@@ -7,10 +7,10 @@ from typing import Dict, List, Optional
 from fastapi import HTTPException
 from hummingbot.client.config.config_crypt import ETHKeyFileSecretManger
 from hummingbot.core.data_type.common import OrderType, TradeType, PositionAction
-from sqlalchemy import select
 
 from config import settings
-from database import AsyncDatabaseManager, AccountRepository, Order, Trade
+from database import AsyncDatabaseManager, AccountRepository, OrderRepository, TradeRepository
+from services.market_data_feed_manager import MarketDataFeedManager
 from utils.connector_manager import ConnectorManager
 from utils.file_system import FileSystemUtil
 
@@ -180,92 +180,57 @@ class AccountsService:
                     await self.connector_manager.initialize_connector_with_tracking(
                         account_name, connector_name, self.db_manager
                     )
-                    await self._update_connector_balance(account_name, connector_name)
+                    # Force initial balance update to ensure first dump has data
+                    connector = self.connector_manager.get_connector(account_name, connector_name)
+                    await connector._update_balances()
                     
             except Exception as e:
                 logging.error(f"Error initializing connector {connector_name} for account {account_name}: {e}")
 
 
-    async def _update_connector_balance(self, account_name: str, connector_name: str):
-        """
-        Update balance for a specific connector and store in accounts_state.
-        This is called after connector initialization to get initial balance data.
-        """
-        try:
-            tokens_info = []
-            connector = self.connector_manager.get_connector(account_name, connector_name)
-            await connector._update_balances()
-            balances = [{"token": key, "units": value} for key, value in connector.get_all_balances().items() if
-                        value != Decimal("0") and key not in settings.banned_tokens]
-            unique_tokens = [balance["token"] for balance in balances]
-            trading_pairs = [self.get_default_market(token, connector_name) for token in unique_tokens if "USD" not in token]
-            last_traded_prices = await self._safe_get_last_traded_prices(connector, trading_pairs)
-            
-            for balance in balances:
-                token = balance["token"]
-                if "USD" in token:
-                    price = Decimal("1")
-                else:
-                    market = self.get_default_market(balance["token"], connector_name)
-                    price = Decimal(last_traded_prices.get(market, 0))
-                tokens_info.append({
-                    "token": balance["token"],
-                    "units": float(balance["units"]),
-                    "price": float(price),
-                    "value": float(price * balance["units"]),
-                    "available_units": float(connector.get_available_balance(balance["token"]))
-                })
-            
-            # Ensure account exists in accounts_state before assignment
-            if account_name not in self.accounts_state:
-                self.accounts_state[account_name] = {}
-                
-            self.accounts_state[account_name][connector_name] = tokens_info
-
-            logging.info(f"Updated balance for {account_name}/{connector_name}: {len(tokens_info)} tokens")
-            
-        except Exception as e:
-            logging.error(f"Error updating balance for connector {connector_name} in account {account_name}: {e}")
-            # Set empty state if update fails
-            if account_name not in self.accounts_state:
-                self.accounts_state[account_name] = {}
-            self.accounts_state[account_name][connector_name] = []
 
     async def update_account_state(self):
-        # Get all connectors from ConnectorManager
+        """Update account state for all connectors."""
         all_connectors = self.connector_manager.get_all_connectors()
         
         for account_name, connectors in all_connectors.items():
             if account_name not in self.accounts_state:
                 self.accounts_state[account_name] = {}
             for connector_name, connector in connectors.items():
-                tokens_info = []
                 try:
-                    balances = [{"token": key, "units": value} for key, value in connector.get_all_balances().items() if
-                                value != Decimal("0") and key not in settings.banned_tokens]
-                    unique_tokens = [balance["token"] for balance in balances]
-                    trading_pairs = [self.get_default_market(token, connector_name) for token in unique_tokens if "USD" not in token]
-                    last_traded_prices = await self._safe_get_last_traded_prices(connector, trading_pairs)
-                    for balance in balances:
-                        token = balance["token"]
-                        if "USD" in token:
-                            price = Decimal("1")
-                        else:
-                            market = self.get_default_market(balance["token"], connector_name)
-                            price = Decimal(last_traded_prices.get(market, 0))
-                        tokens_info.append({
-                            "token": balance["token"],
-                            "units": float(balance["units"]),
-                            "price": float(price),
-                            "value": float(price * balance["units"]),
-                            "available_units": float(connector.get_available_balance(balance["token"]))
-                        })
+                    tokens_info = await self._get_connector_tokens_info(connector, connector_name)
+                    self.accounts_state[account_name][connector_name] = tokens_info
                 except Exception as e:
-                    logging.error(
-                        f"Error updating balances for connector {connector_name} in account {account_name}: {e}")
-                self.accounts_state[account_name][connector_name] = tokens_info
+                    logging.error(f"Error updating balances for connector {connector_name} in account {account_name}: {e}")
+                    self.accounts_state[account_name][connector_name] = []
 
+    async def _get_connector_tokens_info(self, connector, connector_name: str) -> List[Dict]:
+        """Get token info from a connector instance."""
+        balances = [{"token": key, "units": value} for key, value in connector.get_all_balances().items() if
+                    value != Decimal("0") and key not in settings.banned_tokens]
+        unique_tokens = [balance["token"] for balance in balances]
+        trading_pairs = [self.get_default_market(token, connector_name) for token in unique_tokens if "USD" not in token]
+        last_traded_prices = await self._safe_get_last_traded_prices(connector, trading_pairs)
+        
+        tokens_info = []
+        for balance in balances:
+            token = balance["token"]
+            if "USD" in token:
+                price = Decimal("1")
+            else:
+                market = self.get_default_market(balance["token"], connector_name)
+                price = Decimal(last_traded_prices.get(market, 0))
+            tokens_info.append({
+                "token": balance["token"],
+                "units": float(balance["units"]),
+                "price": float(price),
+                "value": float(price * balance["units"]),
+                "available_units": float(connector.get_available_balance(balance["token"]))
+            })
+        return tokens_info
+    
     async def _safe_get_last_traded_prices(self, connector, trading_pairs, timeout=10):
+        """Safely get last traded prices with timeout and error handling."""
         try:
             last_traded = await asyncio.wait_for(connector.get_last_traded_prices(trading_pairs=trading_pairs), timeout=timeout)
             return last_traded
@@ -299,10 +264,9 @@ class AccountsService:
         await self.connector_manager.initialize_connector_with_tracking(
             account_name, connector_name, self.db_manager
         )
-        await self._update_connector_balance(account_name, connector_name)
-
-
-
+        # Force initial balance update to ensure first dump has data
+        connector = self.connector_manager.get_connector(account_name, connector_name)
+        await connector._update_balances()
     @staticmethod
     def list_accounts():
         """
@@ -311,7 +275,8 @@ class AccountsService:
         """
         return file_system.list_folders('credentials')
 
-    def list_credentials(self, account_name: str):
+    @staticmethod
+    def list_credentials(account_name: str):
         """
         List all the credentials that are connected to the specified account.
         :param account_name: The name of the account.
@@ -528,8 +493,8 @@ class AccountsService:
     
     async def place_trade(self, account_name: str, connector_name: str, trading_pair: str, 
                          trade_type: TradeType, amount: Decimal, order_type: OrderType = OrderType.LIMIT, 
-                         price: Optional[Decimal] = None, position_action: Optional[PositionAction] = None, 
-                         market_data_manager = None) -> str:
+                         price: Optional[Decimal] = None, position_action: PositionAction = PositionAction.OPEN, 
+                         market_data_manager: Optional[MarketDataFeedManager] = None) -> str:
         """
         Place a trade using the specified account and connector.
         
@@ -541,6 +506,8 @@ class AccountsService:
             amount: Amount to trade
             order_type: "LIMIT", "MARKET", or "LIMIT_MAKER"
             price: Price for limit orders (required for LIMIT and LIMIT_MAKER)
+            position_action: Position action for perpetual contracts (OPEN/CLOSE)
+            market_data_manager: Market data manager for price fetching
             
         Returns:
             Client order ID assigned by the connector
@@ -563,73 +530,86 @@ class AccountsService:
         if order_type in [OrderType.LIMIT, OrderType.LIMIT_MAKER] and price is None:
             raise HTTPException(status_code=400, detail="Price is required for LIMIT and LIMIT_MAKER orders")
         
-        # For market orders without price, get current market price
-        if order_type == OrderType.MARKET and price is None and market_data_manager:
-            try:
-                prices = await market_data_manager.get_prices(connector_name, [trading_pair])
-                if trading_pair in prices and "error" not in prices:
-                    price = Decimal(str(prices[trading_pair]))
-                    logging.info(f"Retrieved market price for {trading_pair}: {price}")
-                else:
-                    logging.warning(f"Could not get market price for {trading_pair}, using 0")
-                    price = Decimal("0")
-            except Exception as e:
-                logging.error(f"Error getting market price for {trading_pair}: {e}")
-                price = Decimal("0")
+        # Check if trading rules are loaded
+        if not connector.trading_rules:
+            raise HTTPException(
+                status_code=503, 
+                detail=f"Trading rules not yet loaded for {connector_name}. Please try again in a moment."
+            )
         
+        # Validate trading pair and get trading rule
+        if trading_pair not in connector.trading_rules:
+            available_pairs = list(connector.trading_rules.keys())[:10]  # Show first 10
+            more_text = f" (and {len(connector.trading_rules) - 10} more)" if len(connector.trading_rules) > 10 else ""
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Trading pair '{trading_pair}' not supported on {connector_name}. "
+                       f"Available pairs: {available_pairs}{more_text}"
+            )
+        
+        trading_rule = connector.trading_rules[trading_pair]
+        
+        # Validate order type is supported
+        if order_type not in connector.supported_order_types():
+            supported_types = [ot.name for ot in connector.supported_order_types()]
+            raise HTTPException(status_code=400, detail=f"Order type '{order_type.name}' not supported. Supported types: {supported_types}")
+        
+        # Quantize amount according to trading rules
+        quantized_amount = connector.quantize_order_amount(trading_pair, amount)
+        
+        # Validate minimum order size
+        if quantized_amount < trading_rule.min_order_size:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Order amount {quantized_amount} is below minimum order size {trading_rule.min_order_size} for {trading_pair}"
+            )
+        
+        # Calculate and validate notional size
+        if order_type in [OrderType.LIMIT, OrderType.LIMIT_MAKER]:
+            quantized_price = connector.quantize_order_price(trading_pair, price)
+            notional_size = quantized_price * quantized_amount
+        else:
+            # For market orders, use current price
+            current_price = connector.get_price(trading_pair, False)
+            notional_size = current_price * quantized_amount
+            
+        if notional_size < trading_rule.min_notional_size:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Order notional value {notional_size} is below minimum notional size {trading_rule.min_notional_size} for {trading_pair}. "
+                       f"Increase the amount or price to meet the minimum requirement."
+            )
+        
+        # For market orders without price, get current market price for validation
+        if order_type == OrderType.MARKET and price is None:
+            if market_data_manager:
+                try:
+                    prices = await market_data_manager.get_prices(connector_name, [trading_pair])
+                    if trading_pair in prices and "error" not in prices:
+                        price = Decimal(str(prices[trading_pair]))
+                except Exception as e:
+                    logging.error(f"Error getting market price for {trading_pair}: {e}")
+
         try:
-            # Check if this is a perpetual connector that needs position_action
-            is_perpetual = "_perpetual" in connector_name
-            
-            # Use default position action if not specified and it's a perpetual connector
-            if is_perpetual and position_action is None:
-                position_action = PositionAction.OPEN
-            
-            # Place the order using the connector
+            # Place the order using the connector with quantized values
+            # (position_action will be ignored by non-perpetual connectors)
             if trade_type == TradeType.BUY:
-                if is_perpetual:
-                    order_id = connector.buy(
-                        trading_pair=trading_pair,
-                        amount=amount,
-                        order_type=order_type,
-                        price=price or Decimal("0"),
-                        position_action=position_action
-                    )
-                else:
-                    order_id = connector.buy(
-                        trading_pair=trading_pair,
-                        amount=amount,
-                        order_type=order_type,
-                        price=price or Decimal("0")
-                    )
+                order_id = connector.buy(
+                    trading_pair=trading_pair,
+                    amount=quantized_amount,
+                    order_type=order_type,
+                    price=price or Decimal("1"),
+                    position_action=position_action
+                )
             else:
-                if is_perpetual:
-                    order_id = connector.sell(
-                        trading_pair=trading_pair,
-                        amount=amount,
-                        order_type=order_type,
-                        price=price or Decimal("0"),
-                        position_action=position_action
-                    )
-                else:
-                    order_id = connector.sell(
-                        trading_pair=trading_pair,
-                        amount=amount,
-                        order_type=order_type,
-                        price=price or Decimal("0")
-                    )
-            
-            # Wait briefly to check for immediate failures
-            await asyncio.sleep(0.5)
-            
-            # Check if order was immediately rejected or failed
-            if order_id in connector.in_flight_orders:
-                order = connector.in_flight_orders[order_id]
-                if hasattr(order, 'last_state') and order.last_state in ["FAILED", "CANCELLED"]:
-                    error_msg = f"Order failed immediately: {getattr(order, 'last_failure_reason', 'Unknown error')}"
-                    logging.error(error_msg)
-                    raise HTTPException(status_code=400, detail=error_msg)
-            
+                order_id = connector.sell(
+                    trading_pair=trading_pair,
+                    amount=quantized_amount,
+                    order_type=order_type,
+                    price=price or Decimal("1"),
+                    position_action=position_action
+                )
+
             logging.info(f"Placed {trade_type} order for {amount} {trading_pair} on {connector_name} (Account: {account_name}). Order ID: {order_id}")
             return order_id
             
@@ -699,216 +679,133 @@ class AccountsService:
         except Exception as e:
             logging.error(f"Failed to cancel order {client_order_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to cancel order: {str(e)}")
+    
+    async def set_leverage(self, account_name: str, connector_name: str, 
+                          trading_pair: str, leverage: int) -> Dict[str, str]:
+        """
+        Set leverage for a specific trading pair on a perpetual connector.
+        
+        Args:
+            account_name: Name of the account
+            connector_name: Name of the connector (must be perpetual)
+            trading_pair: Trading pair to set leverage for
+            leverage: Leverage value (typically 1-125)
+            
+        Returns:
+            Dictionary with success status and message
+            
+        Raises:
+            HTTPException: If account/connector not found, not perpetual, or operation fails
+        """
+        # Validate this is a perpetual connector
+        if "_perpetual" not in connector_name:
+            raise HTTPException(status_code=400, detail=f"Connector '{connector_name}' is not a perpetual connector")
+        
+        connector = self.get_connector_instance(account_name, connector_name)
+        
+        # Check if connector has leverage functionality
+        if not hasattr(connector, '_execute_set_leverage'):
+            raise HTTPException(status_code=400, detail=f"Connector '{connector_name}' does not support leverage setting")
+        
+        try:
+            await connector._execute_set_leverage(trading_pair, leverage)
+            message = f"Leverage for {trading_pair} set to {leverage} on {connector_name}"
+            logging.info(f"Set leverage for {trading_pair} to {leverage} on {connector_name} (Account: {account_name})")
+            return {"status": "success", "message": message}
+            
+        except Exception as e:
+            logging.error(f"Failed to set leverage for {trading_pair} to {leverage}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to set leverage: {str(e)}")
 
 
     async def get_orders(self, account_name: Optional[str] = None, market: Optional[str] = None, 
                         symbol: Optional[str] = None, status: Optional[str] = None,
                         start_time: Optional[int] = None, end_time: Optional[int] = None,
                         limit: int = 100, offset: int = 0) -> List[Dict]:
-        """Get order history using our AsyncDatabaseManager."""
+        """Get order history using OrderRepository."""
         await self.ensure_db_initialized()
         
         try:
             async with self.db_manager.get_session_context() as session:
-                query = select(Order)
-                
-                # Filter by account name if specified
-                if account_name:
-                    query = query.where(Order.account_name == account_name)
-                
-                # Filter by connector name if specified
-                if market:
-                    query = query.where(Order.connector_name == market)
-                
-                # Filter by trading pair if specified  
-                if symbol:
-                    query = query.where(Order.trading_pair == symbol)
-                
-                # Filter by status if specified
-                if status:
-                    query = query.where(Order.status == status)
-                
-                # Filter by time range if specified
-                if start_time:
-                    start_dt = datetime.fromtimestamp(start_time / 1000)  # Convert from milliseconds
-                    query = query.where(Order.created_at >= start_dt)
-                if end_time:
-                    end_dt = datetime.fromtimestamp(end_time / 1000)  # Convert from milliseconds
-                    query = query.where(Order.created_at <= end_dt)
-                
-                query = query.order_by(Order.created_at.desc())
-                query = query.limit(limit).offset(offset)
-                
-                result = await session.execute(query)
-                orders = result.scalars().all()
-                
-                # Convert to dict format
-                return [
-                    {
-                        "order_id": order.client_order_id,
-                        "account_name": order.account_name,
-                        "connector_name": order.connector_name,
-                        "trading_pair": order.trading_pair,
-                        "trade_type": order.trade_type,
-                        "order_type": order.order_type,
-                        "amount": float(order.amount),
-                        "price": float(order.price) if order.price else None,
-                        "status": order.status,
-                        "filled_amount": float(order.filled_amount),
-                        "average_fill_price": float(order.average_fill_price) if order.average_fill_price else None,
-                        "fee_paid": float(order.fee_paid) if order.fee_paid else None,
-                        "fee_currency": order.fee_currency,
-                        "created_at": order.created_at.isoformat(),
-                        "updated_at": order.updated_at.isoformat(),
-                        "exchange_order_id": order.exchange_order_id,
-                        "error_message": order.error_message,
-                    }
-                    for order in orders
-                ]
+                order_repo = OrderRepository(session)
+                orders = await order_repo.get_orders(
+                    account_name=account_name,
+                    connector_name=market,
+                    trading_pair=symbol,
+                    status=status,
+                    start_time=start_time,
+                    end_time=end_time,
+                    limit=limit,
+                    offset=offset
+                )
+                return [order_repo.to_dict(order) for order in orders]
         except Exception as e:
             logging.error(f"Error getting orders: {e}")
             return []
 
     async def get_active_orders_history(self, account_name: Optional[str] = None, market: Optional[str] = None, 
                                        symbol: Optional[str] = None) -> List[Dict]:
-        """Get active orders from database"""
+        """Get active orders from database using OrderRepository."""
         await self.ensure_db_initialized()
         
         try:
             async with self.db_manager.get_session_context() as session:
-                query = select(Order).where(
-                    Order.status.in_(["SUBMITTED", "OPEN", "PARTIALLY_FILLED"])
+                order_repo = OrderRepository(session)
+                orders = await order_repo.get_active_orders(
+                    account_name=account_name,
+                    connector_name=market,
+                    trading_pair=symbol
                 )
-                
-                # Filter by account name if specified
-                if account_name:
-                    query = query.where(Order.account_name == account_name)
-                
-                # Filter by connector name if specified
-                if market:
-                    query = query.where(Order.connector_name == market)
-                
-                # Filter by trading pair if specified  
-                if symbol:
-                    query = query.where(Order.trading_pair == symbol)
-                
-                query = query.order_by(Order.created_at.desc())
-                query = query.limit(1000)
-                
-                result = await session.execute(query)
-                orders = result.scalars().all()
-                
-                # Convert to dict format using same structure as get_orders
-                return [
-                    {
-                        "order_id": order.client_order_id,
-                        "account_name": order.account_name,
-                        "connector_name": order.connector_name,
-                        "trading_pair": order.trading_pair,
-                        "trade_type": order.trade_type,
-                        "order_type": order.order_type,
-                        "amount": float(order.amount),
-                        "price": float(order.price) if order.price else None,
-                        "status": order.status,
-                        "filled_amount": float(order.filled_amount),
-                        "average_fill_price": float(order.average_fill_price) if order.average_fill_price else None,
-                        "fee_paid": float(order.fee_paid) if order.fee_paid else None,
-                        "fee_currency": order.fee_currency,
-                        "created_at": order.created_at.isoformat(),
-                        "updated_at": order.updated_at.isoformat(),
-                        "exchange_order_id": order.exchange_order_id,
-                        "error_message": order.error_message,
-                    }
-                    for order in orders
-                ]
+                return [order_repo.to_dict(order) for order in orders]
         except Exception as e:
             logging.error(f"Error getting active orders: {e}")
             return []
 
     async def get_orders_summary(self, account_name: Optional[str] = None, start_time: Optional[int] = None,
                                 end_time: Optional[int] = None) -> Dict:
-        """Get order summary statistics"""
-        orders = await self.get_orders(
-            account_name=account_name,
-            start_time=start_time,
-            end_time=end_time,
-            limit=10000  # Get all for summary
-        )
+        """Get order summary statistics using OrderRepository."""
+        await self.ensure_db_initialized()
         
-        total_orders = len(orders)
-        filled_orders = sum(1 for o in orders if o.get("status") == "FILLED")
-        cancelled_orders = sum(1 for o in orders if o.get("status") == "CANCELLED")
-        failed_orders = sum(1 for o in orders if o.get("status") == "FAILED")
-        active_orders = sum(1 for o in orders if o.get("status") in ["SUBMITTED", "OPEN", "PARTIALLY_FILLED"])
-        
-        return {
-            "total_orders": total_orders,
-            "filled_orders": filled_orders,
-            "cancelled_orders": cancelled_orders,
-            "failed_orders": failed_orders,
-            "active_orders": active_orders,
-            "fill_rate": filled_orders / total_orders if total_orders > 0 else 0,
-        }
+        try:
+            async with self.db_manager.get_session_context() as session:
+                order_repo = OrderRepository(session)
+                return await order_repo.get_orders_summary(
+                    account_name=account_name,
+                    start_time=start_time,
+                    end_time=end_time
+                )
+        except Exception as e:
+            logging.error(f"Error getting orders summary: {e}")
+            return {
+                "total_orders": 0,
+                "filled_orders": 0,
+                "cancelled_orders": 0,
+                "failed_orders": 0,
+                "active_orders": 0,
+                "fill_rate": 0,
+            }
 
     async def get_trades(self, account_name: Optional[str] = None, market: Optional[str] = None,
                         symbol: Optional[str] = None, trade_type: Optional[str] = None,
                         start_time: Optional[int] = None, end_time: Optional[int] = None,
                         limit: int = 100, offset: int = 0) -> List[Dict]:
-        """Get trade history using our AsyncDatabaseManager"""
+        """Get trade history using TradeRepository."""
         await self.ensure_db_initialized()
         
         try:
             async with self.db_manager.get_session_context() as session:
-                # Join trades with orders to get account information
-                query = select(Trade).join(Order, Trade.order_id == Order.id)
-                
-                # Filter by account name if specified
-                if account_name:
-                    query = query.where(Order.account_name == account_name)
-                
-                # Filter by connector name if specified
-                if market:
-                    query = query.where(Order.connector_name == market)
-                
-                # Filter by trading pair if specified  
-                if symbol:
-                    query = query.where(Trade.trading_pair == symbol)
-                
-                # Filter by trade type if specified
-                if trade_type:
-                    query = query.where(Trade.trade_type == trade_type)
-                
-                # Filter by time range if specified
-                if start_time:
-                    start_dt = datetime.fromtimestamp(start_time / 1000)  # Convert from milliseconds
-                    query = query.where(Trade.timestamp >= start_dt)
-                if end_time:
-                    end_dt = datetime.fromtimestamp(end_time / 1000)  # Convert from milliseconds
-                    query = query.where(Trade.timestamp <= end_dt)
-                
-                query = query.order_by(Trade.timestamp.desc())
-                query = query.limit(limit).offset(offset)
-                
-                result = await session.execute(query)
-                trades = result.scalars().all()
-                
-                # Convert to dict format
-                return [
-                    {
-                        "trade_id": trade.trade_id,
-                        "order_id": trade.order.client_order_id if trade.order else None,
-                        "account_name": trade.order.account_name if trade.order else None,
-                        "connector_name": trade.order.connector_name if trade.order else None,
-                        "trading_pair": trade.trading_pair,
-                        "trade_type": trade.trade_type,
-                        "amount": float(trade.amount),
-                        "price": float(trade.price),
-                        "fee_paid": float(trade.fee_paid),
-                        "fee_currency": trade.fee_currency,
-                        "timestamp": trade.timestamp.isoformat(),
-                    }
-                    for trade in trades
-                ]
+                trade_repo = TradeRepository(session)
+                trade_order_pairs = await trade_repo.get_trades_with_orders(
+                    account_name=account_name,
+                    connector_name=market,
+                    trading_pair=symbol,
+                    trade_type=trade_type,
+                    start_time=start_time,
+                    end_time=end_time,
+                    limit=limit,
+                    offset=offset
+                )
+                return [trade_repo.to_dict(trade, order) for trade, order in trade_order_pairs]
         except Exception as e:
             logging.error(f"Error getting trades: {e}")
             return []
