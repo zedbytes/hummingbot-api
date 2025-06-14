@@ -56,7 +56,7 @@ class TradeRequest(BaseModel):
     amount: Decimal = Field(description="Amount to trade", gt=0)
     order_type: OrderType = Field(default=OrderType.LIMIT, description="Type of order")
     price: Optional[Decimal] = Field(default=None, description="Price for limit orders")
-    position_action: Optional[PositionAction] = Field(default=PositionAction.OPEN, description="Position action for perpetual contracts (OPEN/CLOSE)")
+    position_action: PositionAction = Field(default=PositionAction.OPEN, description="Position action for perpetual contracts (OPEN/CLOSE)")
 
 
 class TradeResponse(BaseModel):
@@ -70,6 +70,14 @@ class TradeResponse(BaseModel):
     order_type: OrderType = Field(description="Order type")
     price: Optional[Decimal] = Field(description="Order price")
     status: str = Field(default="submitted", description="Order status")
+
+
+class LeverageRequest(BaseModel):
+    """Request model for setting leverage on perpetual connectors"""
+    account_name: str = Field(description="Name of the account")
+    connector_name: str = Field(description="Name of the perpetual connector")
+    trading_pair: str = Field(description="Trading pair (e.g., BTC-USDT)")
+    leverage: int = Field(description="Leverage value (typically 1-125)", ge=1, le=125)
 
 
 class BotAction(BaseModel):
