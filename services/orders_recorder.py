@@ -1,27 +1,20 @@
 import asyncio
 import logging
 from typing import Any, Optional, Union
-from decimal import Decimal
 from datetime import datetime
+from decimal import Decimal
 
 from hummingbot.core.event.event_forwarder import SourceInfoEventForwarder
 from hummingbot.core.event.events import (
-    OrderType,
     TradeType,
     BuyOrderCreatedEvent,
     SellOrderCreatedEvent,
     OrderFilledEvent,
-    OrderCancelledEvent,
-    MarketEvent,
-    BuyOrderCompletedEvent,
-    SellOrderCompletedEvent,
-    MarketOrderFailureEvent
+    MarketEvent
 )
 from hummingbot.connector.connector_base import ConnectorBase
-from sqlalchemy import select
 
-from database import AsyncDatabaseManager
-from database.models import Order, Trade
+from database import AsyncDatabaseManager, OrderRepository, TradeRepository
 
 
 class OrdersRecorder:
@@ -93,6 +86,18 @@ class OrdersRecorder:
             
         logging.info(f"OrdersRecorder stopped for {self.account_name}/{self.connector_name}")
     
+    def _extract_error_message(self, event) -> str:
+        """Extract error message from various possible event attributes."""
+        # Try different possible attribute names for error messages
+        for attr_name in ['error_message', 'message', 'reason', 'failure_reason', 'error']:
+            if hasattr(event, attr_name):
+                error_value = getattr(event, attr_name)
+                if error_value:
+                    return str(error_value)
+        
+        # If no error message found, create a descriptive one
+        return f"Order failed: {event.__class__.__name__}"
+    
     def _did_create_order(self, event_tag: int, market: ConnectorBase, event: Union[BuyOrderCreatedEvent, SellOrderCreatedEvent]):
         """Handle order creation events - called by SourceInfoEventForwarder"""
         logging.info(f"OrdersRecorder: _did_create_order called for order {getattr(event, 'order_id', 'unknown')}")
@@ -137,19 +142,19 @@ class OrdersRecorder:
         logging.info(f"OrdersRecorder: _handle_order_created started for order {event.order_id}")
         try:
             async with self.db_manager.get_session_context() as session:
-                order = Order(
-                    client_order_id=event.order_id,
-                    account_name=self.account_name,
-                    connector_name=self.connector_name,
-                    trading_pair=event.trading_pair,
-                    trade_type=trade_type.name,
-                    order_type=event.order_type.name if hasattr(event, 'order_type') else 'UNKNOWN',
-                    amount=float(event.amount),
-                    price=float(event.price) if event.price else None,
-                    status="SUBMITTED"
-                )
-                session.add(order)
-                await session.commit()
+                order_repo = OrderRepository(session)
+                order_data = {
+                    "client_order_id": event.order_id,
+                    "account_name": self.account_name,
+                    "connector_name": self.connector_name,
+                    "trading_pair": event.trading_pair,
+                    "trade_type": trade_type.name,
+                    "order_type": event.order_type.name if hasattr(event, 'order_type') else 'UNKNOWN',
+                    "amount": float(event.amount),
+                    "price": float(event.price) if event.price else None,
+                    "status": "SUBMITTED"
+                }
+                await order_repo.create_order(order_data)
                 
             logging.info(f"OrdersRecorder: Successfully recorded order created: {event.order_id}")
         except Exception as e:
@@ -159,35 +164,10 @@ class OrdersRecorder:
         """Handle order fill events"""
         try:
             async with self.db_manager.get_session_context() as session:
-                # Update order with fill information
-                result = await session.execute(
-                    select(Order).where(Order.client_order_id == event.order_id)
-                )
-                order = result.scalar_one_or_none()
-                if order:
-                    order.filled_amount = float(event.amount)
-                    order.average_fill_price = float(event.price)
-                    order.status = "FILLED" if event.amount >= Decimal(str(order.amount)) else "PARTIALLY_FILLED"
-                    
-                    # Calculate fee properly using the same method as MarketsRecorder
-                    if event.trade_fee:
-                        try:
-                            base_asset, quote_asset = event.trading_pair.split("-")
-                            fee_in_quote = event.trade_fee.fee_amount_in_token(
-                                trading_pair=event.trading_pair,
-                                price=event.price,
-                                order_amount=event.amount,
-                                token=quote_asset,
-                                exchange=self._connector
-                            )
-                            order.fee_paid = float(fee_in_quote)
-                            order.fee_currency = quote_asset
-                        except Exception as e:
-                            logging.error(f"Error calculating fee in quote: {e}, will be stored as 0")
-                            order.fee_paid = 0
-                            order.fee_currency = None
+                order_repo = OrderRepository(session)
+                trade_repo = TradeRepository(session)
                 
-                # Create trade record
+                # Calculate fees
                 trade_fee_paid = 0
                 trade_fee_currency = None
                 
@@ -208,19 +188,29 @@ class OrdersRecorder:
                         trade_fee_paid = 0
                         trade_fee_currency = None
                 
-                trade = Trade(
-                    order_id=order.id if order else None,
-                    trade_id=f"{event.order_id}_{event.timestamp}",
-                    timestamp=datetime.fromtimestamp(event.timestamp),
-                    trading_pair=event.trading_pair,
-                    trade_type=event.trade_type.name,
-                    amount=float(event.amount),
-                    price=float(event.price),
-                    fee_paid=trade_fee_paid,
+                # Update order with fill information
+                order = await order_repo.update_order_fill(
+                    client_order_id=event.order_id,
+                    filled_amount=Decimal(str(event.amount)),
+                    average_fill_price=Decimal(str(event.price)),
+                    fee_paid=Decimal(str(trade_fee_paid)) if trade_fee_paid else None,
                     fee_currency=trade_fee_currency
                 )
-                session.add(trade)
-                await session.commit()
+                
+                # Create trade record
+                if order:
+                    trade_data = {
+                        "order_id": order.id,
+                        "trade_id": f"{event.order_id}_{event.timestamp}",
+                        "timestamp": datetime.fromtimestamp(event.timestamp),
+                        "trading_pair": event.trading_pair,
+                        "trade_type": event.trade_type.name,
+                        "amount": float(event.amount),
+                        "price": float(event.price),
+                        "fee_paid": trade_fee_paid,
+                        "fee_currency": trade_fee_currency
+                    }
+                    await trade_repo.create_trade(trade_data)
                 
             logging.debug(f"Recorded order fill: {event.order_id} - {event.amount} @ {event.price}")
         except Exception as e:
@@ -230,13 +220,11 @@ class OrdersRecorder:
         """Handle order cancellation events"""
         try:
             async with self.db_manager.get_session_context() as session:
-                result = await session.execute(
-                    select(Order).where(Order.client_order_id == event.order_id)
+                order_repo = OrderRepository(session)
+                await order_repo.update_order_status(
+                    client_order_id=event.order_id,
+                    status="CANCELLED"
                 )
-                order = result.scalar_one_or_none()
-                if order:
-                    order.status = "CANCELLED"
-                    await session.commit()
                     
             logging.debug(f"Recorded order cancelled: {event.order_id}")
         except Exception as e:
@@ -246,16 +234,59 @@ class OrdersRecorder:
         """Handle order failure events"""
         try:
             async with self.db_manager.get_session_context() as session:
-                result = await session.execute(
-                    select(Order).where(Order.client_order_id == event.order_id)
-                )
-                order = result.scalar_one_or_none()
-                if order:
-                    order.status = "FAILED"
-                    order.error_message = getattr(event, 'error_message', None)
-                    await session.commit()
+                order_repo = OrderRepository(session)
+                
+                # Check if order exists, if not try to get details from connector's tracked orders
+                existing_order = await order_repo.get_order_by_client_id(event.order_id)
+                if existing_order:
+                    # Extract error message from various possible attributes
+                    error_msg = self._extract_error_message(event)
                     
-            logging.debug(f"Recorded order failed: {event.order_id}")
+                    # Update existing order with failure status and error message
+                    await order_repo.update_order_status(
+                        client_order_id=event.order_id,
+                        status="FAILED",
+                        error_message=error_msg
+                    )
+                    logging.info(f"Updated existing order {event.order_id} to FAILED status")
+                else:
+                    # Try to get order details from connector's tracked orders
+                    order_details = self._get_order_details_from_connector(event.order_id)
+                    if order_details:
+                        logging.info(f"Retrieved order details from connector for {event.order_id}: {order_details}")
+                    
+                    # Create order record as FAILED with available details
+                    if order_details:
+                        order_data = {
+                            "client_order_id": event.order_id,
+                            "account_name": self.account_name,
+                            "connector_name": self.connector_name,
+                            "trading_pair": order_details["trading_pair"],
+                            "trade_type": order_details["trade_type"],
+                            "order_type": order_details["order_type"],
+                            "amount": order_details["amount"],
+                            "price": order_details["price"],
+                            "status": "FAILED",
+                            "error_message": self._extract_error_message(event)
+                        }
+                    else:
+                        # Fallback with minimal details
+                        order_data = {
+                            "client_order_id": event.order_id,
+                            "account_name": self.account_name,
+                            "connector_name": self.connector_name,
+                            "trading_pair": "UNKNOWN",
+                            "trade_type": "UNKNOWN", 
+                            "order_type": "UNKNOWN",
+                            "amount": 0.0,
+                            "price": None,
+                            "status": "FAILED",
+                            "error_message": self._extract_error_message(event)
+                        }
+                    
+                    await order_repo.create_order(order_data)
+                    logging.info(f"Created failed order record for {event.order_id}")
+                    
         except Exception as e:
             logging.error(f"Error recording order failure: {e}")
     
@@ -263,14 +294,11 @@ class OrdersRecorder:
         """Handle order completion events"""
         try:
             async with self.db_manager.get_session_context() as session:
-                result = await session.execute(
-                    select(Order).where(Order.client_order_id == event.order_id)
-                )
-                order = result.scalar_one_or_none()
+                order_repo = OrderRepository(session)
+                order = await order_repo.get_order_by_client_id(event.order_id)
                 if order:
                     order.status = "FILLED"
                     order.exchange_order_id = getattr(event, 'exchange_order_id', None)
-                    await session.commit()
                     
             logging.debug(f"Recorded order completed: {event.order_id}")
         except Exception as e:
