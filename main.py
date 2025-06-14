@@ -27,6 +27,7 @@ from routers import (
     market_data,
     performance,
     scripts,
+    trading
 )
 
 # Configure logging
@@ -167,6 +168,7 @@ def auth_user(
 # Include all routers with authentication
 app.include_router(docker.router, dependencies=[Depends(auth_user)])
 app.include_router(accounts.router, dependencies=[Depends(auth_user)])
+app.include_router(trading.router, dependencies=[Depends(auth_user)])
 app.include_router(bot_orchestration.router, dependencies=[Depends(auth_user)])
 app.include_router(controllers.router, dependencies=[Depends(auth_user)])
 app.include_router(scripts.router, dependencies=[Depends(auth_user)])
