@@ -62,48 +62,48 @@ class MQTTManager:
 
     @asynccontextmanager
     async def _get_client(self):
-        """Get MQTT client with automatic reconnection."""
-        while True:
-            try:
-                client_id = f"backend-api-{int(time.time())}"
+        """Get MQTT client for a single connection attempt."""
+        client_id = f"backend-api-{int(time.time())}"
 
-                # Create client with credentials if provided
-                if self.username and self.password:
-                    client = aiomqtt.Client(
-                        hostname=self.host,
-                        port=self.port,
-                        username=self.username,
-                        password=self.password,
-                        identifier=client_id,
-                        keepalive=60,
-                    )
-                else:
-                    client = aiomqtt.Client(hostname=self.host, port=self.port, identifier=client_id, keepalive=60)
+        # Create client with credentials if provided
+        if self.username and self.password:
+            client = aiomqtt.Client(
+                hostname=self.host,
+                port=self.port,
+                username=self.username,
+                password=self.password,
+                identifier=client_id,
+                keepalive=60,
+            )
+        else:
+            client = aiomqtt.Client(hostname=self.host, port=self.port, identifier=client_id, keepalive=60)
 
-                async with client:
-                    self._connected = True
-                    logger.info(f"✓ Connected to MQTT broker at {self.host}:{self.port}")
+        async with client:
+            self._connected = True
+            logger.info(f"✓ Connected to MQTT broker at {self.host}:{self.port}")
 
-                    # Subscribe to topics
-                    for topic, qos in self._subscriptions:
-                        await client.subscribe(topic, qos=qos)
-                    yield client
-
-            except aiomqtt.MqttError as error:
-                self._connected = False
-                logger.error(f'MQTT Error "{error}". Reconnecting in {self._reconnect_interval} seconds.')
-                await asyncio.sleep(self._reconnect_interval)
-            except Exception as e:
-                self._connected = False
-                logger.error(f"Unexpected error: {e}. Reconnecting in {self._reconnect_interval} seconds.")
-                await asyncio.sleep(self._reconnect_interval)
+            # Subscribe to topics
+            for topic, qos in self._subscriptions:
+                await client.subscribe(topic, qos=qos)
+            yield client
+            
+        # Cleanup on exit
+        self._connected = False
 
     async def _handle_messages(self):
-        """Main message handling loop."""
-        async with self._get_client() as client:
-            self._client = client
-            async for message in client.messages:
-                await self._process_message(message)
+        """Main message handling loop with reconnection."""
+        while True:
+            try:
+                async with self._get_client() as client:
+                    self._client = client
+                    async for message in client.messages:
+                        await self._process_message(message)
+            except aiomqtt.MqttError as error:
+                logger.error(f'MQTT disconnected during message iteration: "{error}". Reconnecting...')
+                await asyncio.sleep(self._reconnect_interval)
+            except Exception as e:
+                logger.error(f"Unexpected error in message handler: {e}. Reconnecting...")
+                await asyncio.sleep(self._reconnect_interval)
 
     async def _process_message(self, message):
         """Process incoming MQTT message."""
