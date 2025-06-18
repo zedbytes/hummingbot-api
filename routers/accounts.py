@@ -3,6 +3,8 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 from hummingbot.client.settings import AllConnectorSettings
+from hummingbot.core.data_type.common import PositionMode
+from pydantic import BaseModel
 from starlette import status
 
 from services.accounts_service import AccountsService
@@ -181,6 +183,46 @@ async def list_account_credentials(account_name: str, accounts_service: Accounts
         credentials = accounts_service.list_credentials(account_name)
         # Remove .yml extension from filenames
         return [cred.replace('.yml', '') for cred in credentials]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class PositionModeRequest(BaseModel):
+    position_mode: str
+
+@router.post("/{account_name}/{connector_name}/position-mode")
+async def set_position_mode(
+    account_name: str, 
+    connector_name: str, 
+    request: PositionModeRequest,
+    accounts_service: AccountsService = Depends(get_accounts_service)
+):
+    """
+    Set position mode for a perpetual connector.
+    
+    Args:
+        account_name: Name of the account
+        connector_name: Name of the perpetual connector
+        position_mode: Position mode to set (HEDGE or ONEWAY)
+        
+    Returns:
+        Success message with status
+        
+    Raises:
+        HTTPException: 400 if not a perpetual connector or invalid position mode
+    """
+    try:
+        # Convert string to PositionMode enum
+        mode = PositionMode[request.position_mode.upper()]
+        result = await accounts_service.set_position_mode(account_name, connector_name, mode)
+        return result
+    except KeyError:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid position mode '{request.position_mode}'. Must be 'HEDGE' or 'ONEWAY'"
+        )
     except HTTPException:
         raise
     except Exception as e:
