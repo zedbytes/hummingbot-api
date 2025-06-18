@@ -763,6 +763,42 @@ class AccountsService:
             logging.error(f"Failed to set position mode to {position_mode.value}: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to set position mode: {str(e)}")
 
+    async def get_position_mode(self, account_name: str, connector_name: str) -> Dict[str, str]:
+        """
+        Get current position mode for a perpetual connector.
+        
+        Args:
+            account_name: Name of the account
+            connector_name: Name of the connector (must be perpetual)
+            
+        Returns:
+            Dictionary with current position mode
+            
+        Raises:
+            HTTPException: If account/connector not found, not perpetual, or operation fails
+        """
+        # Validate this is a perpetual connector
+        if "_perpetual" not in connector_name:
+            raise HTTPException(status_code=400, detail=f"Connector '{connector_name}' is not a perpetual connector")
+        
+        connector = self.get_connector_instance(account_name, connector_name)
+        
+        # Check if connector has position mode functionality
+        if not hasattr(connector, 'position_mode'):
+            raise HTTPException(status_code=400, detail=f"Connector '{connector_name}' does not support position mode")
+        
+        try:
+            current_mode = connector.position_mode
+            return {
+                "position_mode": current_mode.value if current_mode else "UNKNOWN",
+                "connector": connector_name,
+                "account": account_name
+            }
+            
+        except Exception as e:
+            logging.error(f"Failed to get position mode: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to get position mode: {str(e)}")
+
     async def get_orders(self, account_name: Optional[str] = None, market: Optional[str] = None, 
                         symbol: Optional[str] = None, status: Optional[str] = None,
                         start_time: Optional[int] = None, end_time: Optional[int] = None,

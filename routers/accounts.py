@@ -228,3 +228,31 @@ async def set_position_mode(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@router.get("/{account_name}/{connector_name}/position-mode")
+async def get_position_mode(
+    account_name: str, 
+    connector_name: str, 
+    accounts_service: AccountsService = Depends(get_accounts_service)
+):
+    """
+    Get current position mode for a perpetual connector.
+    
+    Args:
+        account_name: Name of the account
+        connector_name: Name of the perpetual connector
+        
+    Returns:
+        Dictionary with current position mode, connector name, and account name
+        
+    Raises:
+        HTTPException: 400 if not a perpetual connector
+    """
+    try:
+        result = await accounts_service.get_position_mode(account_name, connector_name)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
