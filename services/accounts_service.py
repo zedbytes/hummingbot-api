@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 
 from fastapi import HTTPException
 from hummingbot.client.config.config_crypt import ETHKeyFileSecretManger
-from hummingbot.core.data_type.common import OrderType, TradeType, PositionAction
+from hummingbot.core.data_type.common import OrderType, TradeType, PositionAction, PositionMode
 
 from config import settings
 from database import AsyncDatabaseManager, AccountRepository, OrderRepository, TradeRepository
@@ -717,6 +717,51 @@ class AccountsService:
             logging.error(f"Failed to set leverage for {trading_pair} to {leverage}: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to set leverage: {str(e)}")
 
+    async def set_position_mode(self, account_name: str, connector_name: str, 
+                               position_mode: PositionMode) -> Dict[str, str]:
+        """
+        Set position mode for a perpetual connector.
+        
+        Args:
+            account_name: Name of the account
+            connector_name: Name of the connector (must be perpetual)
+            position_mode: PositionMode.HEDGE or PositionMode.ONEWAY
+            
+        Returns:
+            Dictionary with success status and message
+            
+        Raises:
+            HTTPException: If account/connector not found, not perpetual, or operation fails
+        """
+        # Validate this is a perpetual connector
+        if "_perpetual" not in connector_name:
+            raise HTTPException(status_code=400, detail=f"Connector '{connector_name}' is not a perpetual connector")
+        
+        connector = self.get_connector_instance(account_name, connector_name)
+        
+        # Check if the requested position mode is supported
+        supported_modes = connector.supported_position_modes()
+        if position_mode not in supported_modes:
+            supported_values = [mode.value for mode in supported_modes]
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Position mode '{position_mode.value}' not supported. Supported modes: {supported_values}"
+            )
+        
+        try:
+            # Try to call the method - it might be sync or async
+            result = connector.set_position_mode(position_mode)
+            # If it's a coroutine, await it
+            if asyncio.iscoroutine(result):
+                await result
+            
+            message = f"Position mode set to {position_mode.value} on {connector_name}"
+            logging.info(f"Set position mode to {position_mode.value} on {connector_name} (Account: {account_name})")
+            return {"status": "success", "message": message}
+            
+        except Exception as e:
+            logging.error(f"Failed to set position mode to {position_mode.value}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to set position mode: {str(e)}")
 
     async def get_orders(self, account_name: Optional[str] = None, market: Optional[str] = None, 
                         symbol: Optional[str] = None, status: Optional[str] = None,
