@@ -7,8 +7,8 @@ from hummingbot.client.config.config_crypt import ETHKeyFileSecretManger
 from hummingbot.client.config.config_helpers import ClientConfigAdapter, ReadOnlyClientConfigAdapter, get_connector_class
 from hummingbot.client.settings import AllConnectorSettings
 from hummingbot.connector.connector_base import ConnectorBase
-from hummingbot.connector.exchange_base import ExchangeBase
 from hummingbot.connector.exchange_py_base import ExchangePyBase
+from hummingbot.core.data_type.common import PositionMode
 from hummingbot.core.utils.async_utils import safe_ensure_future
 
 from utils.backend_api_config_adapter import BackendAPIConfigAdapter
@@ -23,16 +23,18 @@ class ConnectorManager:
     This is the single source of truth for all connector instances.
     """
     
-    def __init__(self, secrets_manager: ETHKeyFileSecretManger):
+    def __init__(self, secrets_manager: ETHKeyFileSecretManger, db_manager=None):
         self.secrets_manager = secrets_manager
+        self.db_manager = db_manager
         self._connector_cache: Dict[str, ConnectorBase] = {}
         self._orders_recorders: Dict[str, any] = {}
         self._file_system = FileSystemUtil()
     
-    def get_connector(self, account_name: str, connector_name: str):
+    async def get_connector(self, account_name: str, connector_name: str):
         """
         Get the connector object for the specified account and connector.
         Uses caching to avoid recreating connectors unnecessarily.
+        Ensures proper initialization including position mode setup.
         
         :param account_name: The name of the account.
         :param connector_name: The name of the connector.
@@ -44,7 +46,8 @@ class ConnectorManager:
             return self._connector_cache[cache_key]
         
         try:
-            connector = self._create_connector(account_name, connector_name)
+            # Create connector with full initialization
+            connector = await self._create_and_initialize_connector(account_name, connector_name)
             self._connector_cache[cache_key] = connector
             return connector
         except Exception as e:
@@ -190,28 +193,28 @@ class ConnectorManager:
             "trading_required": connector.is_trading_required
         }
     
-    async def initialize_connector_with_tracking(self, account_name: str, connector_name: str, db_manager=None) -> ConnectorBase:
+    async def _create_and_initialize_connector(self, account_name: str, connector_name: str) -> ConnectorBase:
         """
-        Initialize a connector with order tracking infrastructure.
-        This includes creating the connector, starting its network, and setting up order recording.
+        Create and fully initialize a connector with all necessary setup.
+        This includes creating the connector, starting its network, setting up order recording,
+        and configuring position mode for perpetual connectors.
         
         :param account_name: The name of the account.
         :param connector_name: The name of the connector.
-        :param db_manager: Database manager for order recording (optional).
         :return: The initialized connector instance.
         """
-        # Get or create the connector
-        connector = self.get_connector(account_name, connector_name)
+        # Create the base connector
+        connector = self._create_connector(account_name, connector_name)
         
-        # Start order tracking if db_manager provided
-        if db_manager:
+        # Start order tracking if db_manager is available
+        if self.db_manager:
             cache_key = f"{account_name}:{connector_name}"
             if cache_key not in self._orders_recorders:
                 # Import OrdersRecorder dynamically to avoid circular imports
                 from services.orders_recorder import OrdersRecorder
                 
                 # Create and start orders recorder
-                orders_recorder = OrdersRecorder(db_manager, account_name, connector_name)
+                orders_recorder = OrdersRecorder(self.db_manager, account_name, connector_name)
                 orders_recorder.start(connector)
                 self._orders_recorders[cache_key] = orders_recorder
         
@@ -221,8 +224,24 @@ class ConnectorManager:
         # Update initial balances
         await connector._update_balances()
         
-        logging.info(f"Initialized connector {connector_name} for account {account_name} with tracking")
+        # Set default position mode to HEDGE for perpetual connectors
+        await self._set_default_position_mode(connector)
+        
+        logging.info(f"Initialized connector {connector_name} for account {account_name}")
         return connector
+    
+    async def initialize_connector_with_tracking(self, account_name: str, connector_name: str, db_manager=None) -> ConnectorBase:
+        """
+        DEPRECATED: Use get_connector() instead.
+        This method is kept for backward compatibility but just calls get_connector().
+        
+        :param account_name: The name of the account.
+        :param connector_name: The name of the connector.
+        :param db_manager: Database manager (ignored, use constructor instead).
+        :return: The initialized connector instance.
+        """
+        logging.warning(f"initialize_connector_with_tracking is deprecated, use get_connector() instead")
+        return await self.get_connector(account_name, connector_name)
     
     def _start_network_without_order_book(self, connector: ExchangePyBase):
         """
@@ -242,6 +261,32 @@ class ConnectorManager:
             
         except Exception as e:
             logging.error(f"Error starting connector network without order book: {e}")
+    
+    async def _set_default_position_mode(self, connector):
+        """
+        Set default position mode to HEDGE for perpetual connectors that support position modes.
+        
+        :param connector: The connector instance
+        """
+        try:
+            # Check if this is a perpetual connector
+            if "_perpetual" in connector.name and hasattr(connector, 'set_position_mode'):
+                # Check if HEDGE mode is supported
+                if hasattr(connector, 'supported_position_modes'):
+                    supported_modes = connector.supported_position_modes()
+                    if PositionMode.HEDGE in supported_modes:
+                        # Try to call the method - it might be sync or async
+                        result = connector.set_position_mode(PositionMode.HEDGE)
+                        # If it's a coroutine, await it
+                        if asyncio.iscoroutine(result):
+                            await result
+                        logging.info(f"Set default position mode to HEDGE for {connector.name}")
+                    else:
+                        logging.info(f"HEDGE mode not supported for {connector.name}, skipping position mode setup")
+                else:
+                    logging.info(f"Position modes not supported for {connector.name}, skipping position mode setup")
+        except Exception as e:
+            logging.warning(f"Failed to set default position mode for {connector.name}: {e}")
     
     async def stop_connector(self, account_name: str, connector_name: str):
         """
