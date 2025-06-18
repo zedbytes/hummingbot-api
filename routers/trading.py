@@ -220,7 +220,7 @@ async def get_connector_active_orders(account_name: str, connector_name: str,
         HTTPException: 404 if account or connector not found
     """
     try:
-        return accounts_service.get_active_orders(account_name, connector_name)
+        return await accounts_service.get_active_orders(account_name, connector_name)
     except HTTPException:
         raise
     except Exception as e:
@@ -583,7 +583,7 @@ async def get_trading_rules(account_name: str, connector_name: str, trading_pair
         HTTPException: 404 if account/connector/trading pair not found
     """
     try:
-        connector = accounts_service.get_connector_instance(account_name, connector_name)
+        connector = await accounts_service.get_connector_instance(account_name, connector_name)
         
         if trading_pair not in connector.trading_rules:
             raise HTTPException(status_code=404, detail=f"Trading pair '{trading_pair}' not found")
@@ -628,7 +628,7 @@ async def get_supported_order_types(account_name: str, connector_name: str,
         HTTPException: 404 if account or connector not found
     """
     try:
-        connector = accounts_service.get_connector_instance(account_name, connector_name)
+        connector = await accounts_service.get_connector_instance(account_name, connector_name)
         return [order_type.name for order_type in connector.supported_order_types()]
     except HTTPException:
         raise

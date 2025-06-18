@@ -41,7 +41,6 @@ class AccountsService:
             default_quote: Default quote currency for trading pairs (default: "USDT")
         """
         self.secrets_manager = ETHKeyFileSecretManger(settings.security.config_password)
-        self.connector_manager = ConnectorManager(self.secrets_manager)
         self.accounts_state = {}
         self.update_account_state_interval = account_update_interval * 60
         self.default_quote = default_quote
@@ -50,6 +49,9 @@ class AccountsService:
         # Database setup for account states and orders
         self.db_manager = AsyncDatabaseManager(settings.database.url)
         self._db_initialized = False
+        
+        # Initialize connector manager with db_manager
+        self.connector_manager = ConnectorManager(self.secrets_manager, self.db_manager)
 
     async def ensure_db_initialized(self):
         """Ensure database is initialized before using it."""
@@ -177,11 +179,9 @@ class AccountsService:
             try:
                 # Only initialize if connector doesn't exist
                 if not self.connector_manager.is_connector_initialized(account_name, connector_name):
-                    await self.connector_manager.initialize_connector_with_tracking(
-                        account_name, connector_name, self.db_manager
-                    )
+                    # Get connector will now handle all initialization
+                    connector = await self.connector_manager.get_connector(account_name, connector_name)
                     # Force initial balance update to ensure first dump has data
-                    connector = self.connector_manager.get_connector(account_name, connector_name)
                     await connector._update_balances()
                     
             except Exception as e:
@@ -261,11 +261,9 @@ class AccountsService:
         await self.connector_manager.update_connector_keys(account_name, connector_name, credentials)
         
         # Initialize the connector with tracking
-        await self.connector_manager.initialize_connector_with_tracking(
-            account_name, connector_name, self.db_manager
-        )
-        # Force initial balance update to ensure first dump has data
-        connector = self.connector_manager.get_connector(account_name, connector_name)
+        # Get connector will now handle all initialization
+        connector = await self.connector_manager.get_connector(account_name, connector_name)
+        # Force initial balance update to ensure first dump has data  
         await connector._update_balances()
     @staticmethod
     def list_accounts():
@@ -620,7 +618,7 @@ class AccountsService:
             logging.error(f"Failed to place {trade_type} order: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to place trade: {str(e)}")
     
-    def get_connector_instance(self, account_name: str, connector_name: str):
+    async def get_connector_instance(self, account_name: str, connector_name: str):
         """
         Get a connector instance for direct access.
         
@@ -637,12 +635,14 @@ class AccountsService:
         if account_name not in self.list_accounts():
             raise HTTPException(status_code=404, detail=f"Account '{account_name}' not found")
         
-        if not self.connector_manager.is_connector_initialized(account_name, connector_name):
+        # Check if connector credentials exist
+        available_credentials = self.connector_manager.list_available_credentials(account_name)
+        if connector_name not in available_credentials:
             raise HTTPException(status_code=404, detail=f"Connector '{connector_name}' not found for account '{account_name}'")
         
-        return self.connector_manager.get_connector(account_name, connector_name)
+        return await self.connector_manager.get_connector(account_name, connector_name)
     
-    def get_active_orders(self, account_name: str, connector_name: str) -> Dict[str, any]:
+    async def get_active_orders(self, account_name: str, connector_name: str) -> Dict[str, any]:
         """
         Get active orders for a specific connector.
         
@@ -653,7 +653,7 @@ class AccountsService:
         Returns:
             Dictionary of active orders
         """
-        connector = self.get_connector_instance(account_name, connector_name)
+        connector = await self.get_connector_instance(account_name, connector_name)
         return {order_id: order.to_json() for order_id, order in connector.in_flight_orders.items()}
     
     async def cancel_order(self, account_name: str, connector_name: str, 
@@ -670,7 +670,7 @@ class AccountsService:
         Returns:
             Client order ID that was cancelled
         """
-        connector = self.get_connector_instance(account_name, connector_name)
+        connector = await self.get_connector_instance(account_name, connector_name)
         
         try:
             result = connector.cancel(trading_pair=trading_pair, client_order_id=client_order_id)
@@ -701,7 +701,7 @@ class AccountsService:
         if "_perpetual" not in connector_name:
             raise HTTPException(status_code=400, detail=f"Connector '{connector_name}' is not a perpetual connector")
         
-        connector = self.get_connector_instance(account_name, connector_name)
+        connector = await self.get_connector_instance(account_name, connector_name)
         
         # Check if connector has leverage functionality
         if not hasattr(connector, '_execute_set_leverage'):
@@ -737,7 +737,7 @@ class AccountsService:
         if "_perpetual" not in connector_name:
             raise HTTPException(status_code=400, detail=f"Connector '{connector_name}' is not a perpetual connector")
         
-        connector = self.get_connector_instance(account_name, connector_name)
+        connector = await self.get_connector_instance(account_name, connector_name)
         
         # Check if the requested position mode is supported
         supported_modes = connector.supported_position_modes()
@@ -781,7 +781,7 @@ class AccountsService:
         if "_perpetual" not in connector_name:
             raise HTTPException(status_code=400, detail=f"Connector '{connector_name}' is not a perpetual connector")
         
-        connector = self.get_connector_instance(account_name, connector_name)
+        connector = await self.get_connector_instance(account_name, connector_name)
         
         # Check if connector has position mode functionality
         if not hasattr(connector, 'position_mode'):
