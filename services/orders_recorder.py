@@ -149,10 +149,11 @@ class OrdersRecorder:
                     "connector_name": self.connector_name,
                     "trading_pair": event.trading_pair,
                     "trade_type": trade_type.name,
-                    "order_type": event.order_type.name if hasattr(event, 'order_type') else 'UNKNOWN',
+                    "order_type": event.type.name if hasattr(event, 'type') else 'UNKNOWN',
                     "amount": float(event.amount),
                     "price": float(event.price) if event.price else None,
-                    "status": "SUBMITTED"
+                    "status": "SUBMITTED",
+                    "exchange_order_id": getattr(event, 'exchange_order_id', None)
                 }
                 await order_repo.create_order(order_data)
                 
@@ -229,6 +230,23 @@ class OrdersRecorder:
             logging.debug(f"Recorded order cancelled: {event.order_id}")
         except Exception as e:
             logging.error(f"Error recording order cancellation: {e}")
+    
+    def _get_order_details_from_connector(self, order_id: str) -> Optional[dict]:
+        """Try to get order details from connector's tracked orders"""
+        try:
+            if self._connector and hasattr(self._connector, 'in_flight_orders'):
+                in_flight_order = self._connector.in_flight_orders.get(order_id)
+                if in_flight_order:
+                    return {
+                        "trading_pair": in_flight_order.trading_pair,
+                        "trade_type": in_flight_order.trade_type.name,
+                        "order_type": in_flight_order.order_type.name,
+                        "amount": float(in_flight_order.amount),
+                        "price": float(in_flight_order.price) if in_flight_order.price else None
+                    }
+        except Exception as e:
+            logging.error(f"Error getting order details from connector: {e}")
+        return None
     
     async def _handle_order_failed(self, event: Any):
         """Handle order failure events"""
