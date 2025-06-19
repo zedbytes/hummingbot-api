@@ -16,6 +16,11 @@ router = APIRouter(tags=["Accounts"], prefix="/accounts")
 file_system = FileSystemUtil(base_path="bots/credentials")
 
 
+class LeverageRequest(BaseModel):
+    trading_pair: str
+    leverage: int
+
+
 
 
 @router.get("/connectors", response_model=List[str])
@@ -43,24 +48,6 @@ async def get_connector_config_map(connector_name: str, accounts_service: Accoun
     return accounts_service.get_connector_config_map(connector_name)
 
 
-@router.get("/all-connectors-config-map", response_model=Dict[str, List[str]])
-async def get_all_connectors_config_map(accounts_service: AccountsService = Depends(get_accounts_service)):
-    """
-    Get configuration fields required for all connectors.
-    
-    Returns:
-        Dictionary mapping connector names to their required configuration fields
-    """
-    all_connectors = list(AllConnectorSettings.get_connector_settings().keys())
-    config_maps = {}
-    for connector_name in all_connectors:
-        try:
-            config_maps[connector_name] = accounts_service.get_connector_config_map(connector_name)
-        except Exception as e:
-            config_maps[connector_name] = []
-    return config_maps
-
-
 @router.get("/", response_model=List[str])
 async def list_accounts(accounts_service: AccountsService = Depends(get_accounts_service)):
     """
@@ -72,6 +59,29 @@ async def list_accounts(accounts_service: AccountsService = Depends(get_accounts
     return accounts_service.list_accounts()
 
 
+@router.get("/{account_name}/credentials", response_model=List[str])
+async def list_account_credentials(account_name: str,
+                                   accounts_service: AccountsService = Depends(get_accounts_service)):
+    """
+    Get a list of all connectors that have credentials configured for a specific account.
+
+    Args:
+        account_name: Name of the account to list credentials for
+
+    Returns:
+        List of connector names that have credentials configured
+
+    Raises:
+        HTTPException: 404 if account not found
+    """
+    try:
+        credentials = accounts_service.list_credentials(account_name)
+        # Remove .yml extension from filenames
+        return [cred.replace('.yml', '') for cred in credentials]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/add-account", status_code=status.HTTP_201_CREATED)
@@ -164,31 +174,6 @@ async def add_credential(account_name: str, connector_name: str, credentials: Di
         raise HTTPException(status_code=400, detail=str(e))
 
 
-# Account-specific credential management
-@router.get("/{account_name}/credentials", response_model=List[str])
-async def list_account_credentials(account_name: str, accounts_service: AccountsService = Depends(get_accounts_service)):
-    """
-    Get a list of all connectors that have credentials configured for a specific account.
-    
-    Args:
-        account_name: Name of the account to list credentials for
-        
-    Returns:
-        List of connector names that have credentials configured
-        
-    Raises:
-        HTTPException: 404 if account not found
-    """
-    try:
-        credentials = accounts_service.list_credentials(account_name)
-        # Remove .yml extension from filenames
-        return [cred.replace('.yml', '') for cred in credentials]
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 class PositionModeRequest(BaseModel):
     position_mode: str
 
@@ -255,4 +240,40 @@ async def get_position_mode(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{account_name}/{connector_name}/leverage")
+async def set_leverage(
+    account_name: str, 
+    connector_name: str, 
+    request: LeverageRequest,
+    accounts_service: AccountsService = Depends(get_accounts_service)
+):
+    """
+    Set leverage for a specific trading pair on a perpetual connector.
+    
+    Args:
+        account_name: Name of the account
+        connector_name: Name of the perpetual connector
+        request: Leverage request with trading pair and leverage value
+        accounts_service: Injected accounts service
+        
+    Returns:
+        Dictionary with success status and message
+        
+    Raises:
+        HTTPException: 400 for invalid parameters or non-perpetual connector, 404 for account/connector not found, 500 for execution errors
+    """
+    try:
+        result = await accounts_service.set_leverage(
+            account_name=account_name,
+            connector_name=connector_name,
+            trading_pair=request.trading_pair,
+            leverage=request.leverage
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Unexpected error setting leverage: {str(e)}")
 
