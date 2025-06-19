@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from hummingbot.client.config.client_config_map import ClientConfigMap
 from hummingbot.client.config.config_crypt import ETHKeyFileSecretManger
@@ -174,7 +174,7 @@ class ConnectorManager:
         cache_key = f"{account_name}:{connector_name}"
         return cache_key in self._connector_cache
     
-    def get_connector_state(self, account_name: str, connector_name: str) -> Dict[str, any]:
+    async def get_connector_state(self, account_name: str, connector_name: str) -> Dict[str, any]:
         """
         Get the current state of a connector (balances, trading rules, etc).
         
@@ -182,7 +182,7 @@ class ConnectorManager:
         :param connector_name: The name of the connector.
         :return: Dictionary containing connector state information.
         """
-        connector = self.get_connector(account_name, connector_name)
+        connector = await self.get_connector(account_name, connector_name)
         
         return {
             "balances": {k: float(v) for k, v in connector.get_all_balances().items()},
@@ -229,19 +229,6 @@ class ConnectorManager:
         
         logging.info(f"Initialized connector {connector_name} for account {account_name}")
         return connector
-    
-    async def initialize_connector_with_tracking(self, account_name: str, connector_name: str, db_manager=None) -> ConnectorBase:
-        """
-        DEPRECATED: Use get_connector() instead.
-        This method is kept for backward compatibility but just calls get_connector().
-        
-        :param account_name: The name of the account.
-        :param connector_name: The name of the connector.
-        :param db_manager: Database manager (ignored, use constructor instead).
-        :return: The initialized connector instance.
-        """
-        logging.warning(f"initialize_connector_with_tracking is deprecated, use get_connector() instead")
-        return await self.get_connector(account_name, connector_name)
     
     def _start_network_without_order_book(self, connector: ExchangePyBase):
         """
