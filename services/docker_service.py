@@ -79,6 +79,21 @@ class DockerService:
         except DockerException as e:
             return str(e)
 
+    def get_container_status(self, container_name):
+        """Get the status of a container"""
+        try:
+            container = self.client.containers.get(container_name)
+            return {
+                "success": True,
+                "state": {
+                    "status": container.status,
+                    "running": container.status == "running",
+                    "exit_code": getattr(container.attrs.get("State", {}), "ExitCode", None)
+                }
+            }
+        except DockerException as e:
+            return {"success": False, "message": str(e)}
+
     def remove_container(self, container_name, force=True):
         try:
             container = self.client.containers.get(container_name)
