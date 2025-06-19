@@ -184,8 +184,9 @@ class MarketDataFeedManager:
             # Access connector through MarketDataProvider's _rate_sources LazyDict
             connector = self.market_data_provider._rate_sources[connector_name]
             
-            # Update trading rules to ensure we have the latest data
-            await connector._update_trading_rules()
+            # Check if trading rules are initialized, if not update them
+            if not connector.trading_rules or len(connector.trading_rules) == 0:
+                await connector._update_trading_rules()
             
             # Get trading rules
             if trading_pairs:
@@ -199,11 +200,14 @@ class MarketDataFeedManager:
                             "max_order_size": float(rule.max_order_size) if rule.max_order_size else None,
                             "min_price_increment": float(rule.min_price_increment),
                             "min_base_amount_increment": float(rule.min_base_amount_increment),
+                            "min_quote_amount_increment": float(rule.min_quote_amount_increment),
                             "min_notional_size": float(rule.min_notional_size),
-                            "max_price_significant_digits": rule.max_price_significant_digits,
-                            "max_quantity_significant_digits": rule.max_quantity_significant_digits,
+                            "min_order_value": float(rule.min_order_value),
+                            "max_price_significant_digits": float(rule.max_price_significant_digits),
                             "supports_limit_orders": rule.supports_limit_orders,
                             "supports_market_orders": rule.supports_market_orders,
+                            "buy_order_collateral_token": rule.buy_order_collateral_token,
+                            "sell_order_collateral_token": rule.sell_order_collateral_token,
                         }
                     else:
                         result[trading_pair] = {"error": f"Trading pair {trading_pair} not found"}
@@ -216,11 +220,14 @@ class MarketDataFeedManager:
                         "max_order_size": float(rule.max_order_size) if rule.max_order_size else None,
                         "min_price_increment": float(rule.min_price_increment),
                         "min_base_amount_increment": float(rule.min_base_amount_increment),
+                        "min_quote_amount_increment": float(rule.min_quote_amount_increment),
                         "min_notional_size": float(rule.min_notional_size),
-                        "max_price_significant_digits": rule.max_price_significant_digits,
-                        "max_quantity_significant_digits": rule.max_quantity_significant_digits,
+                        "min_order_value": float(rule.min_order_value),
+                        "max_price_significant_digits": float(rule.max_price_significant_digits),
                         "supports_limit_orders": rule.supports_limit_orders,
                         "supports_market_orders": rule.supports_market_orders,
+                        "buy_order_collateral_token": rule.buy_order_collateral_token,
+                        "sell_order_collateral_token": rule.sell_order_collateral_token,
                     }
             
             self.logger.debug(f"Retrieved trading rules for {connector_name}: {len(result)} pairs")

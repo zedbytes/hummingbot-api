@@ -564,51 +564,6 @@ async def get_account_trades(
 
 
 # Trading Rules & Configuration
-@router.get("/{account_name}/{connector_name}/rules/{trading_pair}")
-async def get_trading_rules(account_name: str, connector_name: str, trading_pair: str, 
-                           accounts_service: AccountsService = Depends(get_accounts_service)):
-    """
-    Get trading rules for a specific trading pair on a connector.
-    
-    Args:
-        account_name: Name of the account
-        connector_name: Name of the connector
-        trading_pair: Trading pair to get rules for
-        accounts_service: Injected accounts service
-        
-    Returns:
-        Trading rules including minimum order size, price increment, etc.
-        
-    Raises:
-        HTTPException: 404 if account/connector/trading pair not found
-    """
-    try:
-        connector = await accounts_service.get_connector_instance(account_name, connector_name)
-        
-        if trading_pair not in connector.trading_rules:
-            raise HTTPException(status_code=404, detail=f"Trading pair '{trading_pair}' not found")
-        
-        trading_rule = connector.trading_rules[trading_pair]
-        return {
-            "trading_pair": trading_pair,
-            "min_order_size": float(trading_rule.min_order_size),
-            "max_order_size": float(trading_rule.max_order_size) if trading_rule.max_order_size else None,
-            "min_price_increment": float(trading_rule.min_price_increment),
-            "min_base_amount_increment": float(trading_rule.min_base_amount_increment),
-            "min_quote_amount_increment": float(trading_rule.min_quote_amount_increment),
-            "min_notional_size": float(trading_rule.min_notional_size),
-            "min_order_value": float(trading_rule.min_order_value),
-            "max_price_significant_digits": float(trading_rule.max_price_significant_digits),
-            "supports_limit_orders": trading_rule.supports_limit_orders,
-            "supports_market_orders": trading_rule.supports_market_orders,
-            "buy_order_collateral_token": trading_rule.buy_order_collateral_token,
-            "sell_order_collateral_token": trading_rule.sell_order_collateral_token,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving trading rules: {str(e)}")
-
 
 @router.get("/{account_name}/{connector_name}/order-types")
 async def get_supported_order_types(account_name: str, connector_name: str, 

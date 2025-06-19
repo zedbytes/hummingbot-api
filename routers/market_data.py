@@ -1,6 +1,7 @@
 import asyncio
+from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, HTTPException
 from hummingbot.data_feed.candles_feed.data_types import CandlesConfig, HistoricalCandlesConfig
 from services.market_data_feed_manager import MarketDataFeedManager
 
@@ -118,3 +119,121 @@ async def get_market_data_settings():
         "feed_timeout": settings.market_data.feed_timeout,
         "description": "cleanup_interval: seconds between cleanup runs, feed_timeout: seconds before unused feeds expire"
     }
+
+
+# Trading Rules Endpoints
+@router.get("/trading-rules/{connector}")
+async def get_all_trading_rules(request: Request, connector: str):
+    """
+    Get trading rules for all available trading pairs on a connector.
+    
+    This endpoint uses the MarketDataFeedManager to access non-trading connector instances,
+    which means no authentication or account setup is required.
+    
+    Args:
+        request: FastAPI request object
+        connector: Name of the connector (e.g., 'binance', 'binance_perpetual')
+        
+    Returns:
+        Dictionary mapping trading pairs to their trading rules
+        
+    Raises:
+        HTTPException: 404 if connector not found, 500 for other errors
+    """
+    try:
+        market_data_feed_manager: MarketDataFeedManager = request.app.state.market_data_feed_manager
+        
+        # Get trading rules for all pairs
+        rules = await market_data_feed_manager.get_trading_rules(connector)
+        
+        if "error" in rules:
+            raise HTTPException(status_code=404, detail=f"Connector '{connector}' not found or error: {rules['error']}")
+        
+        return rules
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving trading rules: {str(e)}")
+
+
+@router.get("/trading-rules/{connector}/{trading_pair}")
+async def get_trading_rules_for_pair(request: Request, connector: str, trading_pair: str):
+    """
+    Get trading rules for a specific trading pair on a connector.
+    
+    This endpoint uses the MarketDataFeedManager to access non-trading connector instances,
+    which means no authentication or account setup is required.
+    
+    Args:
+        request: FastAPI request object
+        connector: Name of the connector (e.g., 'binance', 'binance_perpetual')
+        trading_pair: Trading pair to get rules for (e.g., 'BTC-USDT')
+        
+    Returns:
+        Trading rules including minimum order size, price increment, etc.
+        
+    Raises:
+        HTTPException: 404 if connector or trading pair not found, 500 for other errors
+    """
+    try:
+        market_data_feed_manager: MarketDataFeedManager = request.app.state.market_data_feed_manager
+        
+        # Get trading rules for specific pair
+        rules = await market_data_feed_manager.get_trading_rules(connector, [trading_pair])
+        
+        if "error" in rules:
+            raise HTTPException(status_code=404, detail=f"Connector '{connector}' not found or error: {rules['error']}")
+        
+        if trading_pair not in rules:
+            raise HTTPException(status_code=404, detail=f"Trading pair '{trading_pair}' not found on {connector}")
+        
+        if "error" in rules[trading_pair]:
+            raise HTTPException(status_code=404, detail=rules[trading_pair]["error"])
+        
+        return rules[trading_pair]
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving trading rules: {str(e)}")
+
+
+@router.get("/supported-order-types/{connector}")
+async def get_supported_order_types(request: Request, connector: str):
+    """
+    Get order types supported by a specific connector.
+    
+    This endpoint uses the MarketDataFeedManager to access non-trading connector instances,
+    which means no authentication or account setup is required.
+    
+    Args:
+        request: FastAPI request object
+        connector: Name of the connector (e.g., 'binance', 'binance_perpetual')
+        
+    Returns:
+        List of supported order types (LIMIT, MARKET, LIMIT_MAKER)
+        
+    Raises:
+        HTTPException: 404 if connector not found, 500 for other errors
+    """
+    try:
+        market_data_feed_manager: MarketDataFeedManager = request.app.state.market_data_feed_manager
+        
+        # Access connector through MarketDataProvider's _rate_sources
+        connector_instance = market_data_feed_manager.market_data_provider._rate_sources.get(connector)
+        
+        if not connector_instance:
+            raise HTTPException(status_code=404, detail=f"Connector '{connector}' not found")
+        
+        # Get supported order types
+        if hasattr(connector_instance, 'supported_order_types'):
+            order_types = [order_type.name for order_type in connector_instance.supported_order_types()]
+            return {"connector": connector, "supported_order_types": order_types}
+        else:
+            raise HTTPException(status_code=404, detail=f"Connector '{connector}' does not support order types query")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving order types: {str(e)}")
