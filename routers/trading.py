@@ -7,7 +7,7 @@ from starlette import status
 from services.accounts_service import AccountsService
 from deps import get_accounts_service, get_market_data_feed_manager
 from models import PaginatedResponse
-from models.bot import TradeRequest, TradeResponse, LeverageRequest
+from models.bot import TradeRequest, TradeResponse
 
 router = APIRouter(tags=["Trading"], prefix="/trading")
 
@@ -171,34 +171,6 @@ async def place_trade(trade_request: TradeRequest,
         raise HTTPException(status_code=500, detail=f"Unexpected error placing trade: {str(e)}")
 
 
-@router.post("/leverage", response_model=Dict[str, str], status_code=status.HTTP_200_OK)
-async def set_leverage(leverage_request: LeverageRequest,
-                      accounts_service: AccountsService = Depends(get_accounts_service)):
-    """
-    Set leverage for a specific trading pair on a perpetual connector.
-    
-    Args:
-        leverage_request: Leverage request with account, connector, trading pair, and leverage value
-        accounts_service: Injected accounts service
-        
-    Returns:
-        Dictionary with success status and message
-        
-    Raises:
-        HTTPException: 400 for invalid parameters or non-perpetual connector, 404 for account/connector not found, 500 for execution errors
-    """
-    try:
-        result = await accounts_service.set_leverage(
-            account_name=leverage_request.account_name,
-            connector_name=leverage_request.connector_name,
-            trading_pair=leverage_request.trading_pair,
-            leverage=leverage_request.leverage
-        )
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error setting leverage: {str(e)}")
 
 
 # Order Management
