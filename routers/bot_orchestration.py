@@ -2,7 +2,7 @@ import logging
 import os
 import asyncio
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 
 from models import StartBotAction, StopBotAction, HummingbotInstanceConfig, V2ControllerDeployment
 from services.bots_orchestrator import BotsOrchestrator
@@ -151,9 +151,101 @@ async def stop_bot(action: StopBotAction, bots_manager: BotsOrchestrator = Depen
     return {"status": "success", "response": response}
 
 
+async def _background_stop_and_archive(
+    bot_name: str,
+    actual_bot_name: str,
+    container_name: str,
+    bot_name_for_orchestrator: str,
+    skip_order_cancellation: bool,
+    archive_locally: bool,
+    s3_bucket: str,
+    bots_manager: BotsOrchestrator,
+    docker_manager: DockerService,
+    bot_archiver: BotArchiver
+):
+    """Background task to handle the stop and archive process"""
+    try:
+        logging.info(f"Starting background stop-and-archive for {bot_name}")
+        
+        # Step 1: Stop the bot trading process
+        logging.info(f"Stopping bot trading process for {bot_name_for_orchestrator}")
+        stop_response = await bots_manager.stop_bot(
+            bot_name_for_orchestrator, 
+            skip_order_cancellation=skip_order_cancellation,
+            async_backend=True  # Always use async for background tasks
+        )
+        
+        if not stop_response or not stop_response.get("success", False):
+            error_msg = stop_response.get('error', 'Unknown error') if stop_response else 'No response from bot orchestrator'
+            logging.error(f"Failed to stop bot process: {error_msg}")
+            return
+        
+        # Step 2: Wait for graceful shutdown (15 seconds as requested)
+        logging.info(f"Waiting 15 seconds for bot {bot_name} to gracefully shutdown")
+        await asyncio.sleep(15)
+        
+        # Step 3: Stop the container with monitoring
+        max_retries = 10
+        retry_interval = 2
+        container_stopped = False
+        
+        for i in range(max_retries):
+            logging.info(f"Attempting to stop container {container_name} (attempt {i+1}/{max_retries})")
+            stop_container_response = docker_manager.stop_container(container_name)
+            
+            if stop_container_response.get("success", False):
+                container_stopped = True
+                break
+                
+            # Check if container is already stopped
+            container_status = docker_manager.get_container_status(container_name)
+            if container_status.get("state", {}).get("status") == "exited":
+                container_stopped = True
+                logging.info(f"Container {container_name} is already stopped")
+                break
+                
+            await asyncio.sleep(retry_interval)
+        
+        if not container_stopped:
+            logging.error(f"Failed to stop container {container_name} after {max_retries} attempts")
+            return
+        
+        # Step 4: Archive the bot data
+        instance_dir = os.path.join('bots', 'instances', container_name)
+        logging.info(f"Archiving bot data from {instance_dir}")
+        
+        try:
+            if archive_locally:
+                bot_archiver.archive_locally(container_name, instance_dir)
+            else:
+                bot_archiver.archive_and_upload(container_name, instance_dir, bucket_name=s3_bucket)
+            logging.info(f"Successfully archived bot data for {container_name}")
+        except Exception as e:
+            logging.error(f"Archive failed: {str(e)}")
+            # Continue with removal even if archive fails
+            
+        # Step 5: Remove the container
+        logging.info(f"Removing container {container_name}")
+        remove_response = docker_manager.remove_container(container_name, force=False)
+        
+        if not remove_response.get("success"):
+            # If graceful remove fails, try force remove
+            logging.warning("Graceful container removal failed, attempting force removal")
+            remove_response = docker_manager.remove_container(container_name, force=True)
+        
+        if remove_response.get("success"):
+            logging.info(f"Successfully completed stop-and-archive for bot {bot_name}")
+        else:
+            logging.error(f"Failed to remove container {container_name}")
+            
+    except Exception as e:
+        logging.error(f"Error in background stop-and-archive for {bot_name}: {str(e)}")
+
+
 @router.post("/stop-and-archive-bot/{bot_name}")
 async def stop_and_archive_bot(
     bot_name: str,
+    background_tasks: BackgroundTasks,
     skip_order_cancellation: bool = True,
     async_backend: bool = True,
     archive_locally: bool = True,
@@ -164,13 +256,15 @@ async def stop_and_archive_bot(
     bot_archiver: BotArchiver = Depends(get_bot_archiver)
 ):
     """
-    Gracefully stop a bot and archive its data.
-    This combines the complete shutdown workflow:
+    Gracefully stop a bot and archive its data in the background.
+    This initiates a background task that will:
     1. Stop the bot trading process via MQTT
-    2. Wait for graceful shutdown
-    3. Stop the Docker container
+    2. Wait 15 seconds for graceful shutdown
+    3. Monitor and stop the Docker container
     4. Archive the bot data (locally or to S3)
     5. Remove the container
+    
+    Returns immediately with a success message while the process continues in the background.
     """
     try:
         # Step 1: Normalize bot name and container name
@@ -205,77 +299,37 @@ async def stop_and_archive_bot(
                 }
             }
         
-        # Step 3: Stop the bot trading process
         # Use the format that's actually stored in active bots
         bot_name_for_orchestrator = container_name if container_name in active_bots else actual_bot_name
-        logging.info(f"Stopping bot trading process for {bot_name_for_orchestrator}")
-        stop_response = await bots_manager.stop_bot(
-            bot_name_for_orchestrator, 
+        
+        # Add the background task
+        background_tasks.add_task(
+            _background_stop_and_archive,
+            bot_name=bot_name,
+            actual_bot_name=actual_bot_name,
+            container_name=container_name,
+            bot_name_for_orchestrator=bot_name_for_orchestrator,
             skip_order_cancellation=skip_order_cancellation,
-            async_backend=async_backend
+            archive_locally=archive_locally,
+            s3_bucket=s3_bucket,
+            bots_manager=bots_manager,
+            docker_manager=docker_manager,
+            bot_archiver=bot_archiver
         )
-        
-        if not stop_response or not stop_response.get("success", False):
-            error_msg = stop_response.get('error', 'Unknown error') if stop_response else 'No response from bot orchestrator'
-            return {
-                "status": "error", 
-                "message": f"Failed to stop bot process: {error_msg}",
-                "details": {
-                    "input_name": bot_name,
-                    "actual_bot_name": actual_bot_name,
-                    "container_name": container_name,
-                    "stop_response": stop_response
-                }
-            }
-        
-        # Step 3: Wait a bit for graceful shutdown
-        await asyncio.sleep(5)  # Give the bot time to clean up
-        
-        # Step 4: Stop the container
-        logging.info(f"Stopping container {container_name}")
-        stop_container_response = docker_manager.stop_container(container_name)
-        
-        if not stop_container_response.get("success", True):
-            logging.warning(f"Container stop returned: {stop_container_response}")
-        
-        # Step 5: Archive the bot data
-        instance_dir = os.path.join('bots', 'instances', container_name)
-        logging.info(f"Archiving bot data from {instance_dir}")
-        
-        try:
-            if archive_locally:
-                bot_archiver.archive_locally(container_name, instance_dir)
-            else:
-                bot_archiver.archive_and_upload(container_name, instance_dir, bucket_name=s3_bucket)
-        except Exception as e:
-            logging.error(f"Archive failed: {str(e)}")
-            # Continue with removal even if archive fails
-            
-        # Step 6: Remove the container
-        logging.info(f"Removing container {container_name}")
-        remove_response = docker_manager.remove_container(container_name, force=False)
-        
-        if not remove_response.get("success"):
-            # If graceful remove fails, try force remove
-            logging.warning("Graceful container removal failed, attempting force removal")
-            remove_response = docker_manager.remove_container(container_name, force=True)
         
         return {
             "status": "success",
-            "message": f"Bot {actual_bot_name} stopped and archived successfully",
+            "message": f"Stop and archive process started for bot {actual_bot_name}",
             "details": {
                 "input_name": bot_name,
                 "actual_bot_name": actual_bot_name,
                 "container_name": container_name,
-                "bot_stopped": True,
-                "container_stopped": stop_container_response.get("success", True),
-                "archived": archive_locally or s3_bucket is not None,
-                "container_removed": remove_response.get("success", False)
+                "process": "The bot will be gracefully stopped, archived, and removed in the background. This process typically takes 20-30 seconds."
             }
         }
         
     except Exception as e:
-        logging.error(f"Error in stop_and_archive_bot for {bot_name}: {str(e)}")
+        logging.error(f"Error initiating stop_and_archive_bot for {bot_name}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
