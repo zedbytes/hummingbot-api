@@ -6,10 +6,9 @@ from fastapi import APIRouter, HTTPException
 from starlette import status
 
 from models import Script, ScriptConfig
-from utils.file_system import FileSystemUtil
+from utils.file_system import fs_util
 
 router = APIRouter(tags=["Scripts"], prefix="/scripts")
-file_system = FileSystemUtil()
 
 
 @router.get("/", response_model=List[str])
@@ -20,7 +19,7 @@ async def list_scripts():
     Returns:
         List of script names (without .py extension)
     """
-    return [f.replace('.py', '') for f in file_system.list_files('scripts') if f.endswith('.py')]
+    return [f.replace('.py', '') for f in fs_util.list_files('scripts') if f.endswith('.py')]
 
 
 # Script Configuration endpoints (must come before script name routes)
@@ -33,13 +32,13 @@ async def list_script_configs():
         List of script configuration objects with name, script_file_name, and other metadata
     """
     try:
-        config_files = [f for f in file_system.list_files('conf/scripts') if f.endswith('.yml')]
+        config_files = [f for f in fs_util.list_files('conf/scripts') if f.endswith('.yml')]
         configs = []
         
         for config_file in config_files:
             config_name = config_file.replace('.yml', '')
             try:
-                config = file_system.read_yaml_file(f"conf/scripts/{config_file}")
+                config = fs_util.read_yaml_file(f"conf/scripts/{config_file}")
                 configs.append({
                     "config_name": config_name,
                     "script_file_name": config.get("script_file_name", "unknown"),
@@ -75,7 +74,7 @@ async def get_script_config(config_name: str):
         HTTPException: 404 if configuration not found
     """
     try:
-        config = file_system.read_yaml_file(f"conf/scripts/{config_name}.yml")
+        config = fs_util.read_yaml_file(f"conf/scripts/{config_name}.yml")
         return config
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Configuration '{config_name}' not found")
@@ -98,7 +97,7 @@ async def create_or_update_script_config(config_name: str, config: Dict):
     """
     try:
         yaml_content = yaml.dump(config, default_flow_style=False)
-        file_system.add_file('conf/scripts', f"{config_name}.yml", yaml_content, override=True)
+        fs_util.add_file('conf/scripts', f"{config_name}.yml", yaml_content, override=True)
         return {"message": f"Configuration '{config_name}' saved successfully"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -119,7 +118,7 @@ async def delete_script_config(config_name: str):
         HTTPException: 404 if configuration not found
     """
     try:
-        file_system.delete_file('conf/scripts', f"{config_name}.yml")
+        fs_util.delete_file('conf/scripts', f"{config_name}.yml")
         return {"message": f"Configuration '{config_name}' deleted successfully"}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Configuration '{config_name}' not found")
@@ -140,7 +139,7 @@ async def get_script(script_name: str):
         HTTPException: 404 if script not found
     """
     try:
-        content = file_system.read_file(f"scripts/{script_name}.py")
+        content = fs_util.read_file(f"scripts/{script_name}.py")
         return {
             "name": script_name,
             "content": content
@@ -165,7 +164,7 @@ async def create_or_update_script(script_name: str, script: Script):
         HTTPException: 400 if save error occurs
     """
     try:
-        file_system.add_file('scripts', f"{script_name}.py", script.content, override=True)
+        fs_util.add_file('scripts', f"{script_name}.py", script.content, override=True)
         return {"message": f"Script '{script_name}' saved successfully"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -186,7 +185,7 @@ async def delete_script(script_name: str):
         HTTPException: 404 if script not found
     """
     try:
-        file_system.delete_file('scripts', f"{script_name}.py")
+        fs_util.delete_file('scripts', f"{script_name}.py")
         return {"message": f"Script '{script_name}' deleted successfully"}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Script '{script_name}' not found")
@@ -206,7 +205,7 @@ async def get_script_config_template(script_name: str):
     Raises:
         HTTPException: 404 if script configuration class not found
     """
-    config_class = file_system.load_script_config_class(script_name)
+    config_class = fs_util.load_script_config_class(script_name)
     if config_class is None:
         raise HTTPException(status_code=404, detail=f"Script configuration class for '{script_name}' not found")
 
