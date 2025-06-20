@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 
-from models import StartBotAction, StopBotAction, HummingbotInstanceConfig, V2ControllerDeployment
+from models import StartBotAction, StopBotAction, V2ScriptDeployment, V2ControllerDeployment
 from services.bots_orchestrator import BotsOrchestrator
 from services.docker_service import DockerService
 from deps import get_bots_orchestrator, get_docker_service, get_bot_archiver
@@ -335,7 +335,7 @@ async def stop_and_archive_bot(
 
 @router.post("/create-hummingbot-instance")
 async def create_hummingbot_instance(
-    config: HummingbotInstanceConfig, 
+    config: V2ScriptDeployment, 
     docker_manager: DockerService = Depends(get_docker_service)
 ):
     """
@@ -408,8 +408,8 @@ async def deploy_v2_controllers(
         
         logging.info(f"Generated script config: {script_config_filename} with content: {script_config_content}")
         
-        # Create the HummingbotInstanceConfig with the generated script config
-        instance_config = HummingbotInstanceConfig(
+        # Create the V2ScriptDeployment with the generated script config
+        instance_config = V2ScriptDeployment(
             instance_name=deployment.instance_name,
             credentials_profile=deployment.credentials_profile,
             image=deployment.image,
