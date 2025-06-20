@@ -7,10 +7,7 @@ from docker.errors import DockerException
 from docker.types import LogConfig
 
 from config import settings
-from models import HummingbotInstanceConfig
-from utils.file_system import FileSystemUtil
-
-file_system = FileSystemUtil()
+from models import V2ScriptDeployment
 
 
 class DockerService:
@@ -39,9 +36,17 @@ class DockerService:
 
     def pull_image(self, image_name):
         try:
-            self.client.images.pull(image_name)
+            return self.client.images.pull(image_name)
         except DockerException as e:
             return str(e)
+
+    def pull_image_sync(self, image_name):
+        """Synchronous pull operation for background tasks"""
+        try:
+            result = self.client.images.pull(image_name)
+            return {"success": True, "image": image_name, "result": str(result)}
+        except DockerException as e:
+            return {"success": False, "error": str(e)}
 
     def get_exited_containers(self):
         try:
@@ -102,7 +107,7 @@ class DockerService:
         except DockerException as e:
             return {"success": False, "message": str(e)}
 
-    def create_hummingbot_instance(self, config: HummingbotInstanceConfig):
+    def create_hummingbot_instance(self, config: V2ScriptDeployment):
         bots_path = os.environ.get('BOTS_PATH', self.SOURCE_PATH)  # Default to 'SOURCE_PATH' if BOTS_PATH is not set
         instance_name = f"hummingbot-{config.instance_name}"
         instance_dir = os.path.join("bots", 'instances', instance_name)

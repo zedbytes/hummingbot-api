@@ -21,16 +21,24 @@ class FileSystemUtil:
     as well as dynamic loading of script configurations.
     
     All file operations are performed relative to the base_path unless an absolute path is provided.
+    Implements singleton pattern to ensure the same instance is reused.
     """
+    _instance = None
     base_path: str = "bots"  # Default base path
+
+    def __new__(cls, base_path: Optional[str] = None):
+        if cls._instance is None:
+            cls._instance = super(FileSystemUtil, cls).__new__(cls)
+            cls._instance.base_path = base_path if base_path else "bots"
+        return cls._instance
 
     def __init__(self, base_path: Optional[str] = None):
         """
         Initializes the FileSystemUtil with a base path.
         :param base_path: The base directory path for file operations.
         """
-        if base_path:
-            self.base_path = base_path
+        # Singleton pattern - instance already configured in __new__
+        pass
     
     def _get_full_path(self, path: str) -> str:
         """
@@ -321,7 +329,7 @@ class FileSystemUtil:
         :param connector_name: Name of the connector.
         :return: Path to the connector credentials file.
         """
-        return Path(self.base_path) / "credentials" / account_name / "connectors" / f"{connector_name}.yml"
+        return Path("credentials") / account_name / "connectors" / f"{connector_name}.yml"
 
     def save_model_to_yml(self, yml_path: str, cm: ClientConfigAdapter) -> None:
         """
@@ -438,3 +446,5 @@ class FileSystemUtil:
         except (OSError, PermissionError) as e:
             logging.warning(f"Error listing checkpoints in '{dir_path}': {e}")
             return []
+
+fs_util = FileSystemUtil()

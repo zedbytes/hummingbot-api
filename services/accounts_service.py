@@ -12,9 +12,8 @@ from config import settings
 from database import AsyncDatabaseManager, AccountRepository, OrderRepository, TradeRepository
 from services.market_data_feed_manager import MarketDataFeedManager
 from utils.connector_manager import ConnectorManager
-from utils.file_system import FileSystemUtil
 
-file_system = FileSystemUtil()
+from utils.file_system import fs_util
 
 
 class AccountsService:
@@ -180,9 +179,7 @@ class AccountsService:
                 # Only initialize if connector doesn't exist
                 if not self.connector_manager.is_connector_initialized(account_name, connector_name):
                     # Get connector will now handle all initialization
-                    connector = await self.connector_manager.get_connector(account_name, connector_name)
-                    # Force initial balance update to ensure first dump has data
-                    await connector._update_balances()
+                    await self.connector_manager.get_connector(account_name, connector_name)
                     
             except Exception as e:
                 logging.error(f"Error initializing connector {connector_name} for account {account_name}: {e}")
@@ -260,18 +257,13 @@ class AccountsService:
         # Update the connector keys (this saves the credentials to file)
         await self.connector_manager.update_connector_keys(account_name, connector_name, credentials)
         
-        # Initialize the connector with tracking
-        # Get connector will now handle all initialization
-        connector = await self.connector_manager.get_connector(account_name, connector_name)
-        # Force initial balance update to ensure first dump has data  
-        await connector._update_balances()
     @staticmethod
     def list_accounts():
         """
         List all the accounts that are connected to the trading system.
         :return: List of accounts.
         """
-        return file_system.list_folders('credentials')
+        return fs_util.list_folders('credentials')
 
     @staticmethod
     def list_credentials(account_name: str):
@@ -281,7 +273,7 @@ class AccountsService:
         :return: List of credentials.
         """
         try:
-            return [file for file in file_system.list_files(f'credentials/{account_name}/connectors') if
+            return [file for file in fs_util.list_files(f'credentials/{account_name}/connectors') if
                     file.endswith('.yml')]
         except FileNotFoundError as e:
             raise HTTPException(status_code=404, detail=str(e))
@@ -293,8 +285,8 @@ class AccountsService:
         :param connector_name:
         :return:
         """
-        if file_system.path_exists(f"credentials/{account_name}/connectors/{connector_name}.yml"):
-            file_system.delete_file(directory=f"credentials/{account_name}/connectors", file_name=f"{connector_name}.yml")
+        if fs_util.path_exists(f"credentials/{account_name}/connectors/{connector_name}.yml"):
+            fs_util.delete_file(directory=f"credentials/{account_name}/connectors", file_name=f"{connector_name}.yml")
             
             # Stop the connector if it's running
             await self.connector_manager.stop_connector(account_name, connector_name)
@@ -317,10 +309,10 @@ class AccountsService:
             raise HTTPException(status_code=400, detail="Account already exists.")
         
         files_to_copy = ["conf_client.yml", "conf_fee_overrides.yml", "hummingbot_logs.yml", ".password_verification"]
-        file_system.create_folder('credentials', account_name)
-        file_system.create_folder(f'credentials/{account_name}', "connectors")
+        fs_util.create_folder('credentials', account_name)
+        fs_util.create_folder(f'credentials/{account_name}', "connectors")
         for file in files_to_copy:
-            file_system.copy_file(f"credentials/master_account/{file}", f"credentials/{account_name}/{file}")
+            fs_util.copy_file(f"credentials/master_account/{file}", f"credentials/{account_name}/{file}")
         
         # Initialize account state
         self.accounts_state[account_name] = {}
@@ -336,7 +328,7 @@ class AccountsService:
             await self.connector_manager.stop_connector(account_name, connector_name)
         
         # Delete account folder
-        file_system.delete_folder('credentials', account_name)
+        fs_util.delete_folder('credentials', account_name)
         
         # Remove from account state
         if account_name in self.accounts_state:
@@ -489,6 +481,175 @@ class AccountsService:
             
             return portfolio
     
+    def get_portfolio_distribution(self, account_name: Optional[str] = None) -> Dict[str, any]:
+        """
+        Get portfolio distribution by tokens with percentages.
+        """
+        try:
+            # Get accounts to process
+            accounts_to_process = [account_name] if account_name else list(self.accounts_state.keys())
+            
+            # Aggregate all tokens across accounts and connectors
+            token_values = {}
+            total_value = 0
+            
+            for acc_name in accounts_to_process:
+                if acc_name in self.accounts_state:
+                    for connector_name, connector_data in self.accounts_state[acc_name].items():
+                        for token_info in connector_data:
+                            token = token_info.get("token", "")
+                            value = token_info.get("value", 0)
+                            
+                            if token not in token_values:
+                                token_values[token] = {
+                                    "token": token,
+                                    "total_value": 0,
+                                    "total_units": 0,
+                                    "accounts": {}
+                                }
+                            
+                            token_values[token]["total_value"] += value
+                            token_values[token]["total_units"] += token_info.get("units", 0)
+                            total_value += value
+                            
+                            # Track by account
+                            if acc_name not in token_values[token]["accounts"]:
+                                token_values[token]["accounts"][acc_name] = {
+                                    "value": 0,
+                                    "units": 0,
+                                    "connectors": {}
+                                }
+                            
+                            token_values[token]["accounts"][acc_name]["value"] += value
+                            token_values[token]["accounts"][acc_name]["units"] += token_info.get("units", 0)
+                            
+                            # Track by connector within account
+                            if connector_name not in token_values[token]["accounts"][acc_name]["connectors"]:
+                                token_values[token]["accounts"][acc_name]["connectors"][connector_name] = {
+                                    "value": 0,
+                                    "units": 0
+                                }
+                            
+                            token_values[token]["accounts"][acc_name]["connectors"][connector_name]["value"] += value
+                            token_values[token]["accounts"][acc_name]["connectors"][connector_name]["units"] += token_info.get("units", 0)
+            
+            # Calculate percentages
+            distribution = []
+            for token_data in token_values.values():
+                percentage = (token_data["total_value"] / total_value * 100) if total_value > 0 else 0
+                
+                token_dist = {
+                    "token": token_data["token"],
+                    "total_value": round(token_data["total_value"], 6),
+                    "total_units": token_data["total_units"],
+                    "percentage": round(percentage, 4),
+                    "accounts": {}
+                }
+                
+                # Add account-level percentages
+                for acc_name, acc_data in token_data["accounts"].items():
+                    acc_percentage = (acc_data["value"] / total_value * 100) if total_value > 0 else 0
+                    token_dist["accounts"][acc_name] = {
+                        "value": round(acc_data["value"], 6),
+                        "units": acc_data["units"],
+                        "percentage": round(acc_percentage, 4),
+                        "connectors": {}
+                    }
+                    
+                    # Add connector-level data
+                    for conn_name, conn_data in acc_data["connectors"].items():
+                        token_dist["accounts"][acc_name]["connectors"][conn_name] = {
+                            "value": round(conn_data["value"], 6),
+                            "units": conn_data["units"]
+                        }
+                
+                distribution.append(token_dist)
+            
+            # Sort by value (descending)
+            distribution.sort(key=lambda x: x["total_value"], reverse=True)
+            
+            return {
+                "total_portfolio_value": round(total_value, 6),
+                "token_count": len(distribution),
+                "distribution": distribution,
+                "account_filter": account_name if account_name else "all_accounts"
+            }
+            
+        except Exception as e:
+            logging.error(f"Error calculating portfolio distribution: {e}")
+            return {
+                "total_portfolio_value": 0,
+                "token_count": 0,
+                "distribution": [],
+                "account_filter": account_name if account_name else "all_accounts",
+                "error": str(e)
+            }
+    
+    def get_account_distribution(self) -> Dict[str, any]:
+        """
+        Get portfolio distribution by accounts with percentages.
+        """
+        try:
+            account_values = {}
+            total_value = 0
+            
+            for acc_name, account_data in self.accounts_state.items():
+                account_value = 0
+                connector_values = {}
+                
+                for connector_name, connector_data in account_data.items():
+                    connector_value = 0
+                    for token_info in connector_data:
+                        value = token_info.get("value", 0)
+                        connector_value += value
+                        account_value += value
+                    
+                    connector_values[connector_name] = round(connector_value, 6)
+                
+                account_values[acc_name] = {
+                    "total_value": round(account_value, 6),
+                    "connectors": connector_values
+                }
+                total_value += account_value
+            
+            # Calculate percentages
+            distribution = []
+            for acc_name, acc_data in account_values.items():
+                percentage = (acc_data["total_value"] / total_value * 100) if total_value > 0 else 0
+                
+                connector_dist = {}
+                for conn_name, conn_value in acc_data["connectors"].items():
+                    conn_percentage = (conn_value / total_value * 100) if total_value > 0 else 0
+                    connector_dist[conn_name] = {
+                        "value": conn_value,
+                        "percentage": round(conn_percentage, 4)
+                    }
+                
+                distribution.append({
+                    "account": acc_name,
+                    "total_value": acc_data["total_value"],
+                    "percentage": round(percentage, 4),
+                    "connectors": connector_dist
+                })
+            
+            # Sort by value (descending)
+            distribution.sort(key=lambda x: x["total_value"], reverse=True)
+            
+            return {
+                "total_portfolio_value": round(total_value, 6),
+                "account_count": len(distribution),
+                "distribution": distribution
+            }
+            
+        except Exception as e:
+            logging.error(f"Error calculating account distribution: {e}")
+            return {
+                "total_portfolio_value": 0,
+                "account_count": 0,
+                "distribution": [],
+                "error": str(e)
+            }
+    
     async def place_trade(self, account_name: str, connector_name: str, trading_pair: str, 
                          trade_type: TradeType, amount: Decimal, order_type: OrderType = OrderType.LIMIT, 
                          price: Optional[Decimal] = None, position_action: PositionAction = PositionAction.OPEN, 
@@ -522,7 +683,7 @@ class AccountsService:
             raise HTTPException(status_code=404, detail=f"Connector '{connector_name}' not found for account '{account_name}'")
         
         # Get the connector instance
-        connector = self.connector_manager.get_connector(account_name, connector_name)
+        connector = await self.connector_manager.get_connector(account_name, connector_name)
         
         # Validate price for limit orders
         if order_type in [OrderType.LIMIT, OrderType.LIMIT_MAKER] and price is None:
@@ -567,9 +728,15 @@ class AccountsService:
             quantized_price = connector.quantize_order_price(trading_pair, price)
             notional_size = quantized_price * quantized_amount
         else:
-            # For market orders, use current price
-            current_price = connector.get_price(trading_pair, False)
-            notional_size = current_price * quantized_amount
+            # For market orders without price, get current market price for validation
+            if market_data_manager:
+                try:
+                    prices = await market_data_manager.get_prices(connector_name, [trading_pair])
+                    if trading_pair in prices and "error" not in prices:
+                        price = Decimal(str(prices[trading_pair]))
+                except Exception as e:
+                    logging.error(f"Error getting market price for {trading_pair}: {e}")
+            notional_size = price * quantized_amount
             
         if notional_size < trading_rule.min_notional_size:
             raise HTTPException(
@@ -578,15 +745,7 @@ class AccountsService:
                        f"Increase the amount or price to meet the minimum requirement."
             )
         
-        # For market orders without price, get current market price for validation
-        if order_type == OrderType.MARKET and price is None:
-            if market_data_manager:
-                try:
-                    prices = await market_data_manager.get_prices(connector_name, [trading_pair])
-                    if trading_pair in prices and "error" not in prices:
-                        price = Decimal(str(prices[trading_pair]))
-                except Exception as e:
-                    logging.error(f"Error getting market price for {trading_pair}: {e}")
+
 
         try:
             # Place the order using the connector with quantized values

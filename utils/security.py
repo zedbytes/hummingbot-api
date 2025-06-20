@@ -11,13 +11,11 @@ from hummingbot.client.config.config_helpers import (
 from hummingbot.client.config.security import Security
 
 from config import settings
-from utils.file_system import FileSystemUtil
 from utils.backend_api_config_adapter import BackendAPIConfigAdapter
+from utils.file_system import fs_util
 
 
 class BackendAPISecurity(Security):
-    fs_util = FileSystemUtil(base_path="bots/credentials")
-
     @classmethod
     def login_account(cls, account_name: str, secrets_manager: BaseSecretsManager) -> bool:
         if not cls.validate_password(secrets_manager):
@@ -30,10 +28,10 @@ class BackendAPISecurity(Security):
     def decrypt_all(cls, account_name: str = "master_account"):
         cls._secure_configs.clear()
         cls._decryption_done.clear()
-        encrypted_files = [file for file in cls.fs_util.list_files(directory=f"{account_name}/connectors") if
+        encrypted_files = [file for file in fs_util.list_files(directory=f"credentials/{account_name}/connectors") if
                            file.endswith(".yml")]
         for file in encrypted_files:
-            path = Path(cls.fs_util.base_path + f"/{account_name}/connectors/" + file)
+            path = Path(fs_util.base_path + f"/credentials/{account_name}/connectors/" + file)
             cls.decrypt_connector_config(path)
         cls._decryption_done.set()
 
@@ -54,9 +52,9 @@ class BackendAPISecurity(Security):
     @classmethod
     def update_connector_keys(cls, account_name: str, connector_config: ClientConfigAdapter):
         connector_name = connector_config.connector
-        file_path = cls.fs_util.get_connector_keys_path(account_name=account_name, connector_name=connector_name)
+        file_path = fs_util.get_connector_keys_path(account_name=account_name, connector_name=connector_name)
         cm_yml_str = connector_config.generate_yml_output_str_with_comments()
-        cls.fs_util.ensure_file_and_dump_text(file_path, cm_yml_str)
+        fs_util.ensure_file_and_dump_text(str(file_path), cm_yml_str)
         update_connector_hb_config(connector_config)
         cls._secure_configs[connector_name] = connector_config
 
@@ -67,7 +65,7 @@ class BackendAPISecurity(Security):
     @staticmethod
     def store_password_verification(secrets_manager: BaseSecretsManager):
         encrypted_word = secrets_manager.encrypt_secret_value(PASSWORD_VERIFICATION_WORD, PASSWORD_VERIFICATION_WORD)
-        FileSystemUtil.ensure_file_and_dump_text(settings.app.password_verification_path, encrypted_word)
+        fs_util.ensure_file_and_dump_text(settings.app.password_verification_path, encrypted_word)
 
     @staticmethod
     def validate_password(secrets_manager: BaseSecretsManager) -> bool:

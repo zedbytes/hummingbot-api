@@ -12,8 +12,8 @@ from hummingbot.core.data_type.common import PositionMode
 from hummingbot.core.utils.async_utils import safe_ensure_future
 
 from utils.backend_api_config_adapter import BackendAPIConfigAdapter
+from utils.file_system import FileSystemUtil, fs_util
 from utils.security import BackendAPISecurity
-from utils.file_system import FileSystemUtil
 
 
 class ConnectorManager:
@@ -28,7 +28,6 @@ class ConnectorManager:
         self.db_manager = db_manager
         self._connector_cache: Dict[str, ConnectorBase] = {}
         self._orders_recorders: Dict[str, any] = {}
-        self._file_system = FileSystemUtil()
     
     async def get_connector(self, account_name: str, connector_name: str):
         """
@@ -66,6 +65,11 @@ class ConnectorManager:
         client_config_map = ClientConfigAdapter(ClientConfigMap())
         conn_setting = AllConnectorSettings.get_connector_settings()[connector_name]
         keys = BackendAPISecurity.api_keys(connector_name)
+        
+        # Debug logging
+        logging.info(f"Creating connector {connector_name} for account {account_name}")
+        logging.info(f"API keys retrieved: {list(keys.keys()) if keys else 'None'}")
+        
         read_only_config = ReadOnlyClientConfigAdapter.lock_config(client_config_map)
         
         init_params = conn_setting.conn_init_parameters(
@@ -74,6 +78,9 @@ class ConnectorManager:
             api_keys=keys,
             client_config_map=read_only_config,
         )
+        
+        # Debug logging
+        logging.info(f"Init params keys: {list(init_params.keys())}")
         
         connector_class = get_connector_class(connector_name)
         connector = connector_class(**init_params)
@@ -126,12 +133,14 @@ class ConnectorManager:
         
         BackendAPISecurity.update_connector_keys(account_name, connector_config)
         
+        # Re-decrypt all credentials to ensure the new keys are available
+        BackendAPISecurity.decrypt_all(account_name=account_name)
+        
         # Clear the cache for this connector to force recreation with new keys
         self.clear_cache(account_name, connector_name)
         
         # Create and return new connector instance
-        new_connector = self.get_connector(account_name, connector_name)
-        await new_connector._update_balances()
+        new_connector = await self.get_connector(account_name, connector_name)
         
         return new_connector
     
@@ -225,8 +234,10 @@ class ConnectorManager:
         await connector._update_balances()
         
         # Set default position mode to HEDGE for perpetual connectors
-        await self._set_default_position_mode(connector)
-        
+        if "_perpetual" in connector_name:
+            if PositionMode.HEDGE in connector.supported_position_modes():
+                connector.set_position_mode(PositionMode.HEDGE)
+
         logging.info(f"Initialized connector {connector_name} for account {account_name}")
         return connector
     
@@ -248,32 +259,6 @@ class ConnectorManager:
             
         except Exception as e:
             logging.error(f"Error starting connector network without order book: {e}")
-    
-    async def _set_default_position_mode(self, connector):
-        """
-        Set default position mode to HEDGE for perpetual connectors that support position modes.
-        
-        :param connector: The connector instance
-        """
-        try:
-            # Check if this is a perpetual connector
-            if "_perpetual" in connector.name and hasattr(connector, 'set_position_mode'):
-                # Check if HEDGE mode is supported
-                if hasattr(connector, 'supported_position_modes'):
-                    supported_modes = connector.supported_position_modes()
-                    if PositionMode.HEDGE in supported_modes:
-                        # Try to call the method - it might be sync or async
-                        result = connector.set_position_mode(PositionMode.HEDGE)
-                        # If it's a coroutine, await it
-                        if asyncio.iscoroutine(result):
-                            await result
-                        logging.info(f"Set default position mode to HEDGE for {connector.name}")
-                    else:
-                        logging.info(f"HEDGE mode not supported for {connector.name}, skipping position mode setup")
-                else:
-                    logging.info(f"Position modes not supported for {connector.name}, skipping position mode setup")
-        except Exception as e:
-            logging.warning(f"Failed to set default position mode for {connector.name}: {e}")
     
     async def stop_connector(self, account_name: str, connector_name: str):
         """
@@ -321,7 +306,7 @@ class ConnectorManager:
         :return: List of connector names that have credentials.
         """
         try:
-            files = self._file_system.list_files(f'credentials/{account_name}/connectors')
+            files = fs_util.list_files(f'credentials/{account_name}/connectors')
             return [file.replace('.yml', '') for file in files if file.endswith('.yml')]
         except FileNotFoundError:
             return []
