@@ -3,31 +3,175 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 from hummingbot.client.settings import AllConnectorSettings
-from hummingbot.core.data_type.common import PositionMode
-from pydantic import BaseModel
 from starlette import status
 
 from services.accounts_service import AccountsService
-from utils.file_system import FileSystemUtil
 from deps import get_accounts_service
 from models import PaginatedResponse
 
 router = APIRouter(tags=["Accounts"], prefix="/accounts")
-file_system = FileSystemUtil(base_path="bots/credentials")
 
 
-class LeverageRequest(BaseModel):
-    trading_pair: str
-    leverage: int
+# Portfolio & Account State Monitoring
+@router.get("/portfolio/state", response_model=Dict[str, Dict[str, List[Dict]]])
+async def get_portfolio_state(accounts_service: AccountsService = Depends(get_accounts_service)):
+    """
+    Get the current state of all accounts portfolio.
+    
+    Returns:
+        Dict containing all account states with connector balances and token information
+    """
+    return accounts_service.get_accounts_state()
 
 
+@router.get("/portfolio/history", response_model=PaginatedResponse)
+async def get_portfolio_history(
+    limit: int = Query(default=100, ge=1, le=1000, description="Number of items per page"),
+    cursor: str = Query(default=None, description="Cursor for next page (ISO timestamp)"),
+    start_time: datetime = Query(default=None, description="Start time for filtering"),
+    end_time: datetime = Query(default=None, description="End time for filtering"),
+    accounts_service: AccountsService = Depends(get_accounts_service)
+):
+    """
+    Get the historical state of all accounts portfolio with pagination.
+    """
+    try:
+        data, next_cursor, has_more = await accounts_service.load_account_state_history(
+            limit=limit,
+            cursor=cursor,
+            start_time=start_time,
+            end_time=end_time
+        )
+        
+        return PaginatedResponse(
+            data=data,
+            pagination={
+                "limit": limit,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+                "current_cursor": cursor
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/portfolio/state/{account_name}", response_model=Dict[str, List[Dict]])
+async def get_account_portfolio_state(account_name: str, accounts_service: AccountsService = Depends(get_accounts_service)):
+    """
+    Get current portfolio state of a specific account.
+    
+    Args:
+        account_name: Name of the account to get portfolio state for
+        
+    Returns:
+        Dictionary mapping connector names to lists of token information
+        
+    Raises:
+        HTTPException: 404 if account not found
+    """
+    state = await accounts_service.get_account_current_state(account_name)
+    if not state:
+        raise HTTPException(status_code=404, detail=f"Account '{account_name}' not found")
+    return state
+
+
+@router.get("/portfolio/history/{account_name}", response_model=PaginatedResponse)
+async def get_account_portfolio_history(
+    account_name: str,
+    limit: int = Query(default=100, ge=1, le=1000, description="Number of items per page"),
+    cursor: str = Query(default=None, description="Cursor for next page (ISO timestamp)"),
+    start_time: datetime = Query(default=None, description="Start time for filtering"),
+    end_time: datetime = Query(default=None, description="End time for filtering"),
+    accounts_service: AccountsService = Depends(get_accounts_service)
+):
+    """
+    Get historical portfolio state of a specific account with pagination.
+    
+    Args:
+        account_name: Name of the account to get history for
+        limit: Number of items per page (1-1000)
+        cursor: Cursor for pagination (ISO timestamp)
+        start_time: Start time for filtering results
+        end_time: End time for filtering results
+        
+    Returns:
+        Paginated response with historical account portfolio data
+    """
+    data, next_cursor, has_more = await accounts_service.get_account_state_history(
+        account_name=account_name,
+        limit=limit,
+        cursor=cursor,
+        start_time=start_time,
+        end_time=end_time
+    )
+    
+    return PaginatedResponse(
+        data=data,
+        pagination={
+            "limit": limit,
+            "has_more": has_more,
+            "next_cursor": next_cursor,
+            "current_cursor": cursor,
+            "filters": {
+                "account_name": account_name,
+                "start_time": start_time.isoformat() if start_time else None,
+                "end_time": end_time.isoformat() if end_time else None
+            }
+        }
+    )
+
+
+@router.get("/portfolio/distribution")
+async def get_portfolio_distribution(accounts_service: AccountsService = Depends(get_accounts_service)):
+    """
+    Get portfolio distribution by tokens with percentages across all accounts.
+    
+    Returns:
+        Dictionary with token distribution including percentages, values, and breakdown by accounts/connectors
+    """
+    return accounts_service.get_portfolio_distribution()
+
+
+@router.get("/portfolio/distribution/{account_name}")
+async def get_account_portfolio_distribution(account_name: str, accounts_service: AccountsService = Depends(get_accounts_service)):
+    """
+    Get portfolio distribution by tokens with percentages for a specific account.
+    
+    Args:
+        account_name: Name of the account to get distribution for
+        
+    Returns:
+        Dictionary with token distribution for the specified account
+        
+    Raises:
+        HTTPException: 404 if account not found
+    """
+    result = accounts_service.get_portfolio_distribution(account_name)
+    
+    # Check if account exists by looking at the distribution
+    if result.get("token_count", 0) == 0 and not result.get("error") and account_name not in accounts_service.get_accounts_state():
+        raise HTTPException(status_code=404, detail=f"Account '{account_name}' not found")
+    
+    return result
+
+
+@router.get("/portfolio/accounts-distribution")
+async def get_accounts_distribution(accounts_service: AccountsService = Depends(get_accounts_service)):
+    """
+    Get portfolio distribution by accounts with percentages.
+    
+    Returns:
+        Dictionary with account distribution including percentages, values, and breakdown by connectors
+    """
+    return accounts_service.get_account_distribution()
 
 
 @router.get("/connectors", response_model=List[str])
 async def available_connectors():
     """
     Get a list of all available connectors.
-    
+
     Returns:
         List of connector names supported by the system
     """
@@ -174,106 +318,4 @@ async def add_credential(account_name: str, connector_name: str, credentials: Di
         raise HTTPException(status_code=400, detail=str(e))
 
 
-class PositionModeRequest(BaseModel):
-    position_mode: str
-
-@router.post("/{account_name}/{connector_name}/position-mode")
-async def set_position_mode(
-    account_name: str, 
-    connector_name: str, 
-    request: PositionModeRequest,
-    accounts_service: AccountsService = Depends(get_accounts_service)
-):
-    """
-    Set position mode for a perpetual connector.
-    
-    Args:
-        account_name: Name of the account
-        connector_name: Name of the perpetual connector
-        position_mode: Position mode to set (HEDGE or ONEWAY)
-        
-    Returns:
-        Success message with status
-        
-    Raises:
-        HTTPException: 400 if not a perpetual connector or invalid position mode
-    """
-    try:
-        # Convert string to PositionMode enum
-        mode = PositionMode[request.position_mode.upper()]
-        result = await accounts_service.set_position_mode(account_name, connector_name, mode)
-        return result
-    except KeyError:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Invalid position mode '{request.position_mode}'. Must be 'HEDGE' or 'ONEWAY'"
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/{account_name}/{connector_name}/position-mode")
-async def get_position_mode(
-    account_name: str, 
-    connector_name: str, 
-    accounts_service: AccountsService = Depends(get_accounts_service)
-):
-    """
-    Get current position mode for a perpetual connector.
-    
-    Args:
-        account_name: Name of the account
-        connector_name: Name of the perpetual connector
-        
-    Returns:
-        Dictionary with current position mode, connector name, and account name
-        
-    Raises:
-        HTTPException: 400 if not a perpetual connector
-    """
-    try:
-        result = await accounts_service.get_position_mode(account_name, connector_name)
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/{account_name}/{connector_name}/leverage")
-async def set_leverage(
-    account_name: str, 
-    connector_name: str, 
-    request: LeverageRequest,
-    accounts_service: AccountsService = Depends(get_accounts_service)
-):
-    """
-    Set leverage for a specific trading pair on a perpetual connector.
-    
-    Args:
-        account_name: Name of the account
-        connector_name: Name of the perpetual connector
-        request: Leverage request with trading pair and leverage value
-        accounts_service: Injected accounts service
-        
-    Returns:
-        Dictionary with success status and message
-        
-    Raises:
-        HTTPException: 400 for invalid parameters or non-perpetual connector, 404 for account/connector not found, 500 for execution errors
-    """
-    try:
-        result = await accounts_service.set_leverage(
-            account_name=account_name,
-            connector_name=connector_name,
-            trading_pair=request.trading_pair,
-            leverage=request.leverage
-        )
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error setting leverage: {str(e)}")
 
