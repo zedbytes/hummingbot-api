@@ -45,10 +45,6 @@ logging.getLogger('services.mqtt_manager').setLevel(logging.DEBUG)
 # Load environment variables early
 load_dotenv()
 
-# Apply patches for third-party libraries
-from patches import apply_config_helpers_patch
-apply_config_helpers_patch()
-
 # Get settings from Pydantic Settings
 username = settings.security.username
 password = settings.security.password
@@ -64,7 +60,7 @@ async def lifespan(app: FastAPI):
     Lifespan context manager for the FastAPI application.
     Handles startup and shutdown events.
     """
-    # Ensure password verification file exists FIRST
+    # Ensure password verification file exists
     if BackendAPISecurity.new_password_required():
         # Create secrets manager with CONFIG_PASSWORD
         secrets_manager = ETHKeyFileSecretManger(password=settings.security.config_password)
