@@ -1,23 +1,13 @@
-from typing import Dict, Union
-
 from fastapi import APIRouter
 from hummingbot.data_feed.candles_feed.candles_factory import CandlesFactory
 from hummingbot.strategy_v2.backtesting.backtesting_engine_base import BacktestingEngineBase
-from pydantic import BaseModel
 
 from config import settings
+from models.backtesting import BacktestingConfig
 
 router = APIRouter(tags=["Backtesting"], prefix="/backtesting")
 candles_factory = CandlesFactory()
 backtesting_engine = BacktestingEngineBase()
-
-
-class BacktestingConfig(BaseModel):
-    start_time: int = 1735689600  # 2025-01-01 00:00:00
-    end_time: int = 1738368000  # 2025-02-01 00:00:00
-    backtesting_resolution: str = "1m"
-    trade_cost: float = 0.0006
-    config: Union[Dict, str]
 
 
 @router.post("/run-backtesting")

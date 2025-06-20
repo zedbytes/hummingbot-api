@@ -8,10 +8,9 @@ import pandas as pd
 from utils.etl_databases import HummingbotDatabase, ETLPerformance
 from fastapi import APIRouter
 
-from utils.file_system import FileSystemUtil
+from utils.file_system import fs_util
 
 router = APIRouter(tags=["Databases"], prefix="/databases")
-file_system = FileSystemUtil()
 
 
 @router.get("/", response_model=List[str])
@@ -22,7 +21,7 @@ async def list_databases():
     Returns:
         List of database file paths
     """
-    return file_system.list_databases()
+    return fs_util.list_databases()
 
 
 @router.post("/read", response_model=List[Dict[str, Any]])
@@ -111,7 +110,7 @@ async def list_checkpoints(full_path: bool):
     Returns:
         List of checkpoint file paths or names
     """
-    return file_system.list_checkpoints(full_path)
+    return fs_util.list_checkpoints(full_path)
 
 
 @router.post("/checkpoints/load")
