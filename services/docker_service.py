@@ -8,6 +8,7 @@ from docker.types import LogConfig
 
 from config import settings
 from models import V2ScriptDeployment
+from utils.file_system import fs_util
 
 
 class DockerService:
@@ -145,7 +146,9 @@ class DockerService:
                 
                 # Load the script config to find referenced controllers
                 try:
-                    script_config_content = FileSystemUtil.read_yaml_file(source_script_config_file)
+                    # Path relative to fs_util base_path (which is "bots")
+                    script_config_relative_path = f"conf/scripts/{config.script_config}"
+                    script_config_content = fs_util.read_yaml_file(script_config_relative_path)
                     controllers_list = script_config_content.get('controllers_config', [])
                     
                     # If there are controllers referenced, copy them
@@ -166,10 +169,11 @@ class DockerService:
                     logging.error(f"Error reading script config file {config.script_config}: {e}")
             else:
                 logging.warning(f"Script config file {config.script_config} not found in {script_config_dir}")
-        conf_file_path = f"{instance_dir}/conf/conf_client.yml"
-        client_config = FileSystemUtil.read_yaml_file(conf_file_path)
+        # Path relative to fs_util base_path (which is "bots")
+        conf_file_path = f"instances/{instance_name}/conf/conf_client.yml"
+        client_config = fs_util.read_yaml_file(conf_file_path)
         client_config['instance_id'] = instance_name
-        FileSystemUtil.dump_dict_to_yaml(conf_file_path, client_config)
+        fs_util.dump_dict_to_yaml(conf_file_path, client_config)
 
         # Set up Docker volumes
         volumes = {

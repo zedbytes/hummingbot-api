@@ -8,7 +8,7 @@ from models import StartBotAction, StopBotAction, V2ScriptDeployment, V2Controll
 from services.bots_orchestrator import BotsOrchestrator
 from services.docker_service import DockerService
 from deps import get_bots_orchestrator, get_docker_service, get_bot_archiver
-from utils.file_system import FileSystemUtil
+from utils.file_system import fs_util
 from utils.bot_archiver import BotArchiver
 
 router = APIRouter(tags=["Bot Orchestration"], prefix="/bot-orchestration")
@@ -153,7 +153,6 @@ async def stop_bot(action: StopBotAction, bots_manager: BotsOrchestrator = Depen
 
 async def _background_stop_and_archive(
     bot_name: str,
-    actual_bot_name: str,
     container_name: str,
     bot_name_for_orchestrator: str,
     skip_order_cancellation: bool,
@@ -191,11 +190,7 @@ async def _background_stop_and_archive(
         
         for i in range(max_retries):
             logging.info(f"Attempting to stop container {container_name} (attempt {i+1}/{max_retries})")
-            stop_container_response = docker_manager.stop_container(container_name)
-            
-            if stop_container_response.get("success", False):
-                container_stopped = True
-                break
+            docker_manager.stop_container(container_name)
                 
             # Check if container is already stopped
             container_status = docker_manager.get_container_status(container_name)
@@ -247,10 +242,8 @@ async def stop_and_archive_bot(
     bot_name: str,
     background_tasks: BackgroundTasks,
     skip_order_cancellation: bool = True,
-    async_backend: bool = True,
     archive_locally: bool = True,
     s3_bucket: str = None,
-    timeout: float = 30.0,
     bots_manager: BotsOrchestrator = Depends(get_bots_orchestrator),
     docker_manager: DockerService = Depends(get_docker_service),
     bot_archiver: BotArchiver = Depends(get_bot_archiver)
@@ -305,8 +298,7 @@ async def stop_and_archive_bot(
         # Add the background task
         background_tasks.add_task(
             _background_stop_and_archive,
-            bot_name=bot_name,
-            actual_bot_name=actual_bot_name,
+            bot_name=actual_bot_name,
             container_name=container_name,
             bot_name_for_orchestrator=bot_name_for_orchestrator,
             skip_order_cancellation=skip_order_cancellation,
@@ -400,11 +392,11 @@ async def deploy_v2_controllers(
             script_config_content["max_controller_drawdown"] = deployment.max_controller_drawdown
         
         # Save the script config to the scripts directory
-        scripts_dir = os.path.join("bots", "conf", "scripts")
+        scripts_dir = os.path.join("conf", "scripts")
         os.makedirs(scripts_dir, exist_ok=True)
         
         script_config_path = os.path.join(scripts_dir, script_config_filename)
-        FileSystemUtil.dump_dict_to_yaml(script_config_path, script_config_content)
+        fs_util.dump_dict_to_yaml(script_config_path, script_config_content)
         
         logging.info(f"Generated script config: {script_config_filename} with content: {script_config_content}")
         
