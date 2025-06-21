@@ -1,8 +1,10 @@
 import asyncio
 import logging
+import math
+import time
 from typing import Any, Optional, Union
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from hummingbot.core.event.event_forwarder import SourceInfoEventForwarder
 from hummingbot.core.event.events import (
@@ -189,29 +191,45 @@ class OrdersRecorder:
                         trade_fee_paid = 0
                         trade_fee_currency = None
                 
-                # Update order with fill information
-                order = await order_repo.update_order_fill(
-                    client_order_id=event.order_id,
-                    filled_amount=Decimal(str(event.amount)),
-                    average_fill_price=Decimal(str(event.price)),
-                    fee_paid=Decimal(str(trade_fee_paid)) if trade_fee_paid else None,
-                    fee_currency=trade_fee_currency
-                )
+                # Update order with fill information (handle potential NaN values like Hummingbot does)
+                try:
+                    filled_amount = Decimal(str(event.amount))
+                    average_fill_price = Decimal(str(event.price))
+                    fee_paid_decimal = Decimal(str(trade_fee_paid)) if trade_fee_paid else None
+                    
+                    order = await order_repo.update_order_fill(
+                        client_order_id=event.order_id,
+                        filled_amount=filled_amount,
+                        average_fill_price=average_fill_price,
+                        fee_paid=fee_paid_decimal,
+                        fee_currency=trade_fee_currency
+                    )
+                except (ValueError, InvalidOperation) as e:
+                    logging.error(f"Error processing order fill for {event.order_id}: {e}, skipping update")
+                    return
                 
-                # Create trade record
+                # Create trade record using validated values
                 if order:
-                    trade_data = {
-                        "order_id": order.id,
-                        "trade_id": f"{event.order_id}_{event.timestamp}",
-                        "timestamp": datetime.fromtimestamp(event.timestamp),
-                        "trading_pair": event.trading_pair,
-                        "trade_type": event.trade_type.name,
-                        "amount": float(event.amount),
-                        "price": float(event.price),
-                        "fee_paid": trade_fee_paid,
-                        "fee_currency": trade_fee_currency
-                    }
-                    await trade_repo.create_trade(trade_data)
+                    try:
+                        # Validate all values before creating trade record
+                        validated_timestamp = event.timestamp if event.timestamp and not math.isnan(event.timestamp) else time.time()
+                        validated_fee = trade_fee_paid if trade_fee_paid and not math.isnan(trade_fee_paid) else 0
+                        
+                        trade_data = {
+                            "order_id": order.id,
+                            "trade_id": f"{event.order_id}_{validated_timestamp}",
+                            "timestamp": datetime.fromtimestamp(validated_timestamp),
+                            "trading_pair": event.trading_pair,
+                            "trade_type": event.trade_type.name,
+                            "amount": float(filled_amount),  # Use validated amount
+                            "price": float(average_fill_price),  # Use validated price
+                            "fee_paid": validated_fee,
+                            "fee_currency": trade_fee_currency
+                        }
+                        await trade_repo.create_trade(trade_data)
+                    except (ValueError, TypeError) as e:
+                        logging.error(f"Error creating trade record for {event.order_id}: {e}")
+                        logging.error(f"Trade data that failed: timestamp={event.timestamp}, amount={event.amount}, price={event.price}, fee={trade_fee_paid}")
                 
             logging.debug(f"Recorded order fill: {event.order_id} - {event.amount} @ {event.price}")
         except Exception as e:
