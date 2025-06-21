@@ -49,19 +49,27 @@ class OrderRepository:
         )
         order = result.scalar_one_or_none()
         if order:
-            order.filled_amount = float(filled_amount)
+            # Add to existing filled amount instead of replacing
+            previous_filled = Decimal(str(order.filled_amount or 0))
+            order.filled_amount = float(previous_filled + filled_amount)
+            
+            # Update average price (simplified - use latest fill price)
             order.average_fill_price = float(average_fill_price)
+            
+            # Add to existing fees
             if fee_paid is not None:
-                order.fee_paid = float(fee_paid)
+                previous_fee = Decimal(str(order.fee_paid or 0))
+                order.fee_paid = float(previous_fee + fee_paid)
             if fee_currency:
                 order.fee_currency = fee_currency
             if exchange_order_id:
                 order.exchange_order_id = exchange_order_id
             
-            # Update status based on fill amount
-            if filled_amount >= Decimal(str(order.amount)):
+            # Update status based on total filled amount
+            total_filled = Decimal(str(order.filled_amount))
+            if total_filled >= Decimal(str(order.amount)):
                 order.status = "FILLED"
-            else:
+            elif total_filled > 0:
                 order.status = "PARTIALLY_FILLED"
             
             await self.session.flush()
