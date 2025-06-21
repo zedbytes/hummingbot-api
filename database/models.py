@@ -68,7 +68,7 @@ class Order(Base):
     average_fill_price = Column(Numeric(precision=30, scale=18), nullable=True)
     
     # Fee information
-    fee_paid = Column(Numeric(precision=30, scale=18), nullable=True)
+    fee_paid = Column(Numeric(precision=30, scale=18), default=0, nullable=True)
     fee_currency = Column(String, nullable=True)
     
     # Additional metadata
@@ -102,5 +102,76 @@ class Trade(Base):
     
     # Relationship
     order = relationship("Order", back_populates="trades")
+
+
+class PositionSnapshot(Base):
+    __tablename__ = "position_snapshots"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Position identification
+    account_name = Column(String, nullable=False, index=True)
+    connector_name = Column(String, nullable=False, index=True)
+    trading_pair = Column(String, nullable=False, index=True)
+    
+    # Timestamps
+    timestamp = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False, index=True)
+    
+    # Real-time exchange data (from connector.account_positions)
+    side = Column(String, nullable=False)  # LONG, SHORT
+    exchange_size = Column(Numeric(precision=30, scale=18), nullable=False)  # Size from exchange
+    entry_price = Column(Numeric(precision=30, scale=18), nullable=True)  # Average entry price
+    mark_price = Column(Numeric(precision=30, scale=18), nullable=True)  # Current mark price
+    
+    # Real-time PnL data (can't be derived from trades alone)
+    unrealized_pnl = Column(Numeric(precision=30, scale=18), nullable=True)  # From exchange
+    percentage_pnl = Column(Numeric(precision=10, scale=6), nullable=True)  # PnL percentage
+    
+    # Leverage and margin info
+    leverage = Column(Numeric(precision=10, scale=2), nullable=True)  # Position leverage
+    initial_margin = Column(Numeric(precision=30, scale=18), nullable=True)  # Initial margin
+    maintenance_margin = Column(Numeric(precision=30, scale=18), nullable=True)  # Maintenance margin
+    
+    # Fee tracking (exchange provides cumulative data)
+    cumulative_funding_fees = Column(Numeric(precision=30, scale=18), nullable=False, default=0)  # Funding fees
+    fee_currency = Column(String, nullable=True)  # Fee currency (usually USDT)
+    
+    # Reconciliation fields (calculated from our trade data)
+    calculated_size = Column(Numeric(precision=30, scale=18), nullable=True)  # Size from our trades
+    calculated_entry_price = Column(Numeric(precision=30, scale=18), nullable=True)  # Entry from our trades
+    size_difference = Column(Numeric(precision=30, scale=18), nullable=True)  # Difference for reconciliation
+    
+    # Additional metadata
+    exchange_position_id = Column(String, nullable=True, index=True)  # Exchange position ID
+    is_reconciled = Column(String, nullable=False, default="PENDING")  # RECONCILED, MISMATCH, PENDING
+
+
+class FundingPayment(Base):
+    __tablename__ = "funding_payments"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Payment identification
+    funding_payment_id = Column(String, nullable=False, unique=True, index=True)
+    
+    # Timestamps
+    timestamp = Column(TIMESTAMP(timezone=True), nullable=False, index=True)
+    
+    # Account and connector info
+    account_name = Column(String, nullable=False, index=True)
+    connector_name = Column(String, nullable=False, index=True)
+    
+    # Funding details
+    trading_pair = Column(String, nullable=False, index=True)
+    funding_rate = Column(Numeric(precision=20, scale=18), nullable=False)  # Funding rate
+    funding_payment = Column(Numeric(precision=30, scale=18), nullable=False)  # Payment amount
+    fee_currency = Column(String, nullable=False)  # Payment currency (usually USDT)
+    
+    # Position association
+    position_size = Column(Numeric(precision=30, scale=18), nullable=True)  # Position size at time of payment
+    position_side = Column(String, nullable=True)  # LONG, SHORT
+    
+    # Additional metadata
+    exchange_funding_id = Column(String, nullable=True, index=True)  # Exchange funding ID
 
 
