@@ -9,7 +9,7 @@ from hummingbot.client.config.config_crypt import ETHKeyFileSecretManger
 from hummingbot.core.data_type.common import OrderType, TradeType, PositionAction, PositionMode
 
 from config import settings
-from database import AsyncDatabaseManager, AccountRepository, OrderRepository, TradeRepository
+from database import AsyncDatabaseManager, AccountRepository, OrderRepository, TradeRepository, PositionRepository, FundingRepository
 from services.market_data_feed_manager import MarketDataFeedManager
 from utils.connector_manager import ConnectorManager
 
@@ -1049,3 +1049,216 @@ class AccountsService:
         except Exception as e:
             logging.error(f"Error getting trades: {e}")
             return []
+
+    async def get_account_positions(self, account_name: str, connector_name: str) -> List[Dict]:
+        """
+        Get current positions for a specific perpetual connector.
+        
+        Args:
+            account_name: Name of the account
+            connector_name: Name of the connector (must be perpetual)
+            
+        Returns:
+            List of position dictionaries
+            
+        Raises:
+            HTTPException: If account/connector not found or not perpetual
+        """
+        # Validate this is a perpetual connector
+        if "_perpetual" not in connector_name:
+            raise HTTPException(status_code=400, detail=f"Connector '{connector_name}' is not a perpetual connector")
+        
+        connector = await self.get_connector_instance(account_name, connector_name)
+        
+        # Check if connector has account_positions property
+        if not hasattr(connector, 'account_positions'):
+            raise HTTPException(status_code=400, detail=f"Connector '{connector_name}' does not support position tracking")
+        
+        try:
+            positions = []
+            raw_positions = connector.account_positions
+            
+            for trading_pair, position_info in raw_positions.items():
+                # Convert position data to dict format
+                position_dict = {
+                    "account_name": account_name,
+                    "connector_name": connector_name,
+                    "trading_pair": trading_pair,
+                    "side": position_info.position_side.name if hasattr(position_info, 'position_side') else "UNKNOWN",
+                    "amount": float(position_info.amount) if hasattr(position_info, 'amount') else 0.0,
+                    "entry_price": float(position_info.entry_price) if hasattr(position_info, 'entry_price') else None,
+                    "mark_price": float(position_info.mark_price) if hasattr(position_info, 'mark_price') else None,
+                    "unrealized_pnl": float(position_info.unrealized_pnl) if hasattr(position_info, 'unrealized_pnl') else None,
+                    "percentage_pnl": float(position_info.unrealized_pnl_percentage) if hasattr(position_info, 'unrealized_pnl_percentage') else None,
+                    "leverage": float(position_info.leverage) if hasattr(position_info, 'leverage') else None,
+                    "margin": float(position_info.initial_margin) if hasattr(position_info, 'initial_margin') else None,
+                    "maintenance_margin": float(position_info.maintenance_margin) if hasattr(position_info, 'maintenance_margin') else None,
+                    "funding_fees": float(position_info.cumulative_funding_fee) if hasattr(position_info, 'cumulative_funding_fee') else 0.0,
+                }
+                
+                # Only include positions with non-zero amounts
+                if position_dict["amount"] != 0:
+                    positions.append(position_dict)
+            
+            return positions
+            
+        except Exception as e:
+            logging.error(f"Failed to get positions for {connector_name}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to get positions: {str(e)}")
+
+    async def save_position_snapshot(self, account_name: str, connector_name: str) -> Dict[str, int]:
+        """
+        Save current positions as snapshots in the database for historical tracking.
+        
+        Args:
+            account_name: Name of the account
+            connector_name: Name of the connector
+            
+        Returns:
+            Dictionary with count of snapshots saved
+        """
+        await self.ensure_db_initialized()
+        
+        try:
+            # Get current positions from connector
+            positions = await self.get_account_positions(account_name, connector_name)
+            
+            if not positions:
+                return {"snapshots_saved": 0, "message": "No active positions to save"}
+            
+            async with self.db_manager.get_session_context() as session:
+                position_repo = PositionRepository(session)
+                snapshots_saved = 0
+                
+                for position in positions:
+                    # Create snapshot data
+                    snapshot_data = {
+                        "account_name": account_name,
+                        "connector_name": connector_name,
+                        "trading_pair": position["trading_pair"],
+                        "side": position["side"],
+                        "exchange_size": position["amount"],
+                        "entry_price": position["entry_price"],
+                        "mark_price": position["mark_price"],
+                        "unrealized_pnl": position["unrealized_pnl"],
+                        "percentage_pnl": position["percentage_pnl"],
+                        "leverage": position["leverage"],
+                        "initial_margin": position["margin"],
+                        "maintenance_margin": position["maintenance_margin"],
+                        "cumulative_funding_fees": position["funding_fees"],
+                        "fee_currency": "USDT",  # Most perpetuals use USDT
+                        "is_reconciled": "PENDING"
+                    }
+                    
+                    await position_repo.create_position_snapshot(snapshot_data)
+                    snapshots_saved += 1
+                
+                return {
+                    "snapshots_saved": snapshots_saved,
+                    "message": f"Saved {snapshots_saved} position snapshots for {account_name}/{connector_name}"
+                }
+                
+        except Exception as e:
+            logging.error(f"Error saving position snapshots: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to save position snapshots: {str(e)}")
+
+    async def get_position_snapshots(self, account_name: str, connector_name: str = None) -> List[Dict]:
+        """
+        Get latest position snapshots from database.
+        
+        Args:
+            account_name: Name of the account
+            connector_name: Optional connector name filter
+            
+        Returns:
+            List of latest position snapshots
+        """
+        await self.ensure_db_initialized()
+        
+        try:
+            async with self.db_manager.get_session_context() as session:
+                position_repo = PositionRepository(session)
+                
+                if connector_name:
+                    positions = await position_repo.get_latest_positions(account_name, connector_name)
+                    return [position_repo.to_dict(pos) for pos in positions]
+                else:
+                    # Get for all perpetual connectors
+                    all_positions = []
+                    all_connectors = self.connector_manager.get_all_connectors()
+                    
+                    if account_name in all_connectors:
+                        for conn_name in all_connectors[account_name].keys():
+                            if "_perpetual" in conn_name:
+                                positions = await position_repo.get_latest_positions(account_name, conn_name)
+                                all_positions.extend([position_repo.to_dict(pos) for pos in positions])
+                    
+                    return all_positions
+                    
+        except Exception as e:
+            logging.error(f"Error getting position snapshots: {e}")
+            return []
+
+    async def get_funding_payments(self, account_name: str, connector_name: str = None, 
+                                  trading_pair: str = None, limit: int = 100) -> List[Dict]:
+        """
+        Get funding payment history for an account.
+        
+        Args:
+            account_name: Name of the account
+            connector_name: Optional connector name filter
+            trading_pair: Optional trading pair filter
+            limit: Maximum number of records to return
+            
+        Returns:
+            List of funding payment dictionaries
+        """
+        await self.ensure_db_initialized()
+        
+        try:
+            async with self.db_manager.get_session_context() as session:
+                funding_repo = FundingRepository(session)
+                funding_payments = await funding_repo.get_funding_payments(
+                    account_name=account_name,
+                    connector_name=connector_name,
+                    trading_pair=trading_pair,
+                    limit=limit
+                )
+                return [funding_repo.to_dict(payment) for payment in funding_payments]
+                
+        except Exception as e:
+            logging.error(f"Error getting funding payments: {e}")
+            return []
+
+    async def get_total_funding_fees(self, account_name: str, connector_name: str, 
+                                   trading_pair: str) -> Dict:
+        """
+        Get total funding fees for a specific trading pair.
+        
+        Args:
+            account_name: Name of the account
+            connector_name: Name of the connector
+            trading_pair: Trading pair to get fees for
+            
+        Returns:
+            Dictionary with total funding fees information
+        """
+        await self.ensure_db_initialized()
+        
+        try:
+            async with self.db_manager.get_session_context() as session:
+                funding_repo = FundingRepository(session)
+                return await funding_repo.get_total_funding_fees(
+                    account_name=account_name,
+                    connector_name=connector_name,
+                    trading_pair=trading_pair
+                )
+                
+        except Exception as e:
+            logging.error(f"Error getting total funding fees: {e}")
+            return {
+                "total_funding_fees": 0,
+                "payment_count": 0,
+                "fee_currency": None,
+                "error": str(e)
+            }
