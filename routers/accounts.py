@@ -318,4 +318,258 @@ async def add_credential(account_name: str, connector_name: str, credentials: Di
         raise HTTPException(status_code=400, detail=str(e))
 
 
+# Position Management Endpoints
+
+@router.get("/{account_name}/{connector_name}/positions", response_model=List[Dict])
+async def get_account_positions(
+    account_name: str,
+    connector_name: str,
+    accounts_service: AccountsService = Depends(get_accounts_service)
+):
+    """
+    Get current positions for a specific perpetual connector.
+    
+    This endpoint fetches real-time position data directly from the connector,
+    including unrealized PnL, leverage, funding fees, and margin information.
+    
+    Args:
+        account_name: Name of the account
+        connector_name: Name of the perpetual connector
+        
+    Returns:
+        List of current position dictionaries with real-time data
+        
+    Raises:
+        HTTPException: 400 if connector is not perpetual or doesn't support positions
+        HTTPException: 404 if account or connector not found
+        HTTPException: 500 if there's an error fetching positions
+    """
+    try:
+        return await accounts_service.get_account_positions(account_name, connector_name)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching positions: {str(e)}")
+
+@router.get("/{account_name}/positions/snapshots", response_model=List[Dict])
+async def get_position_snapshots(
+    account_name: str,
+    connector_name: Optional[str] = Query(default=None, description="Filter by specific connector"),
+    accounts_service: AccountsService = Depends(get_accounts_service)
+):
+    """
+    Get latest position snapshots from database for historical analysis.
+    
+    Returns the most recent position snapshots for the specified account,
+    optionally filtered by connector. Useful for tracking position history
+    and performance over time.
+    
+    Args:
+        account_name: Name of the account
+        connector_name: Optional connector name to filter results
+        
+    Returns:
+        List of latest position snapshot dictionaries from database
+        
+    Raises:
+        HTTPException: 404 if account not found
+        HTTPException: 500 if there's an error fetching snapshots
+    """
+    try:
+        return await accounts_service.get_position_snapshots(account_name, connector_name)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching position snapshots: {str(e)}")
+
+
+@router.get("/{account_name}/positions", response_model=List[Dict])
+async def get_all_account_positions(
+    account_name: str,
+    accounts_service: AccountsService = Depends(get_accounts_service)
+):
+    """
+    Get current positions across all perpetual connectors for an account.
+    
+    This endpoint aggregates real-time position data from all perpetual connectors
+    associated with the specified account, providing a complete portfolio view.
+    
+    Args:
+        account_name: Name of the account
+        
+    Returns:
+        List of position dictionaries from all perpetual connectors
+        
+    Raises:
+        HTTPException: 404 if account not found
+        HTTPException: 500 if there's an error fetching positions
+    """
+    try:
+        all_positions = []
+        
+        # Get all connectors for the account
+        all_connectors = accounts_service.connector_manager.get_all_connectors()
+        
+        if account_name in all_connectors:
+            for connector_name in all_connectors[account_name].keys():
+                # Only fetch positions from perpetual connectors
+                if "_perpetual" in connector_name:
+                    try:
+                        positions = await accounts_service.get_account_positions(account_name, connector_name)
+                        all_positions.extend(positions)
+                    except Exception as e:
+                        # Log error but continue with other connectors
+                        import logging
+                        logging.warning(f"Failed to get positions for {connector_name}: {e}")
+        
+        return all_positions
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching account positions: {str(e)}")
+
+
+# Funding Fee Management Endpoints
+
+@router.get("/{account_name}/{connector_name}/funding-payments", response_model=List[Dict])
+async def get_funding_payments(
+    account_name: str,
+    connector_name: str,
+    trading_pair: Optional[str] = Query(default=None, description="Filter by trading pair"),
+    limit: int = Query(default=100, ge=1, le=1000, description="Maximum number of records"),
+    accounts_service: AccountsService = Depends(get_accounts_service)
+):
+    """
+    Get funding payment history for a specific perpetual connector.
+    
+    This endpoint retrieves historical funding payment records including
+    funding rates, payment amounts, and position data at time of payment.
+    
+    Args:
+        account_name: Name of the account
+        connector_name: Name of the perpetual connector
+        trading_pair: Optional trading pair filter
+        limit: Maximum number of records to return
+        
+    Returns:
+        List of funding payment records with rates, amounts, and position data
+        
+    Raises:
+        HTTPException: 400 if connector is not perpetual
+        HTTPException: 404 if account or connector not found
+        HTTPException: 500 if there's an error fetching funding payments
+    """
+    try:
+        # Validate this is a perpetual connector
+        if "_perpetual" not in connector_name:
+            raise HTTPException(status_code=400, detail=f"Connector '{connector_name}' is not a perpetual connector")
+        
+        return await accounts_service.get_funding_payments(
+            account_name=account_name,
+            connector_name=connector_name,
+            trading_pair=trading_pair,
+            limit=limit
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching funding payments: {str(e)}")
+
+
+@router.get("/{account_name}/{connector_name}/funding-fees/{trading_pair}", response_model=Dict)
+async def get_total_funding_fees(
+    account_name: str,
+    connector_name: str,
+    trading_pair: str,
+    accounts_service: AccountsService = Depends(get_accounts_service)
+):
+    """
+    Get total funding fees summary for a specific trading pair.
+    
+    This endpoint provides aggregated funding fee information including
+    total fees paid/received, payment count, and fee currency.
+    
+    Args:
+        account_name: Name of the account
+        connector_name: Name of the perpetual connector
+        trading_pair: Trading pair to get fees for
+        
+    Returns:
+        Dictionary with total funding fees summary
+        
+    Raises:
+        HTTPException: 400 if connector is not perpetual
+        HTTPException: 404 if account or connector not found
+        HTTPException: 500 if there's an error calculating fees
+    """
+    try:
+        # Validate this is a perpetual connector
+        if "_perpetual" not in connector_name:
+            raise HTTPException(status_code=400, detail=f"Connector '{connector_name}' is not a perpetual connector")
+        
+        return await accounts_service.get_total_funding_fees(
+            account_name=account_name,
+            connector_name=connector_name,
+            trading_pair=trading_pair
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error calculating funding fees: {str(e)}")
+
+
+@router.get("/{account_name}/funding-payments", response_model=List[Dict])
+async def get_all_account_funding_payments(
+    account_name: str,
+    limit: int = Query(default=100, ge=1, le=1000, description="Maximum number of records"),
+    accounts_service: AccountsService = Depends(get_accounts_service)
+):
+    """
+    Get funding payment history across all perpetual connectors for an account.
+    
+    This endpoint aggregates funding payment data from all perpetual connectors
+    associated with the specified account, providing a complete funding fee view.
+    
+    Args:
+        account_name: Name of the account
+        limit: Maximum number of records to return
+        
+    Returns:
+        List of funding payment records from all perpetual connectors
+        
+    Raises:
+        HTTPException: 404 if account not found
+        HTTPException: 500 if there's an error fetching funding payments
+    """
+    try:
+        all_funding_payments = []
+        
+        # Get all connectors for the account
+        all_connectors = accounts_service.connector_manager.get_all_connectors()
+        
+        if account_name in all_connectors:
+            for connector_name in all_connectors[account_name].keys():
+                # Only fetch funding payments from perpetual connectors
+                if "_perpetual" in connector_name:
+                    try:
+                        payments = await accounts_service.get_funding_payments(
+                            account_name=account_name,
+                            connector_name=connector_name,
+                            limit=limit
+                        )
+                        all_funding_payments.extend(payments)
+                    except Exception as e:
+                        # Log error but continue with other connectors
+                        import logging
+                        logging.warning(f"Failed to get funding payments for {connector_name}: {e}")
+        
+        # Sort by timestamp (most recent first)
+        all_funding_payments.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        
+        # Apply limit to the combined results
+        return all_funding_payments[:limit]
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching account funding payments: {str(e)}")
+
+
 
