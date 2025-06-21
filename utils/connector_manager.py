@@ -28,6 +28,7 @@ class ConnectorManager:
         self.db_manager = db_manager
         self._connector_cache: Dict[str, ConnectorBase] = {}
         self._orders_recorders: Dict[str, any] = {}
+        self._funding_recorders: Dict[str, any] = {}
     
     async def get_connector(self, account_name: str, connector_name: str):
         """
@@ -226,6 +227,16 @@ class ConnectorManager:
                 orders_recorder = OrdersRecorder(self.db_manager, account_name, connector_name)
                 orders_recorder.start(connector)
                 self._orders_recorders[cache_key] = orders_recorder
+            
+            # Start funding tracking for perpetual connectors
+            if "_perpetual" in connector_name and cache_key not in self._funding_recorders:
+                # Import FundingRecorder dynamically to avoid circular imports
+                from services.funding_recorder import FundingRecorder
+                
+                # Create and start funding recorder
+                funding_recorder = FundingRecorder(self.db_manager, account_name, connector_name)
+                funding_recorder.start(connector)
+                self._funding_recorders[cache_key] = funding_recorder
         
         # Start the connector's network without order book tracker
         self._start_network_without_order_book(connector)
@@ -277,6 +288,15 @@ class ConnectorManager:
                 logging.info(f"Stopped order recorder for {account_name}/{connector_name}")
             except Exception as e:
                 logging.error(f"Error stopping order recorder for {account_name}/{connector_name}: {e}")
+        
+        # Stop funding recorder if exists
+        if cache_key in self._funding_recorders:
+            try:
+                await self._funding_recorders[cache_key].stop()
+                del self._funding_recorders[cache_key]
+                logging.info(f"Stopped funding recorder for {account_name}/{connector_name}")
+            except Exception as e:
+                logging.error(f"Error stopping funding recorder for {account_name}/{connector_name}: {e}")
         
         # Stop connector network if exists
         if cache_key in self._connector_cache:
