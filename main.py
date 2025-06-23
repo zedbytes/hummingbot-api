@@ -19,13 +19,12 @@ from services.market_data_feed_manager import MarketDataFeedManager
 from utils.bot_archiver import BotArchiver
 from routers import (
     accounts,
+    archived_bots,
     backtesting,
     bot_orchestration,
     controllers,
-    databases,
     docker,
     market_data,
-    performance,
     scripts,
     trading
 )
@@ -174,8 +173,7 @@ app.include_router(controllers.router, dependencies=[Depends(auth_user)])
 app.include_router(scripts.router, dependencies=[Depends(auth_user)])
 app.include_router(market_data.router, dependencies=[Depends(auth_user)])
 app.include_router(backtesting.router, dependencies=[Depends(auth_user)])
-app.include_router(databases.router, dependencies=[Depends(auth_user)])
-app.include_router(performance.router, dependencies=[Depends(auth_user)])
+app.include_router(archived_bots.router, dependencies=[Depends(auth_user)])
 
 @app.get("/")
 async def root():
