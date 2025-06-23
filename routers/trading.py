@@ -2,7 +2,7 @@ from typing import Dict, List, Optional
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Depends, Query
-from hummingbot.core.data_type.common import PositionMode
+from hummingbot.core.data_type.common import PositionMode, TradeType, OrderType, PositionAction
 from starlette import status
 
 from services.accounts_service import AccountsService
@@ -34,15 +34,20 @@ async def place_trade(trade_request: TradeRequest,
         HTTPException: 400 for invalid parameters, 404 for account/connector not found, 500 for trade execution errors
     """
     try:
+        # Convert string names to enum instances
+        trade_type_enum = TradeType[trade_request.trade_type]
+        order_type_enum = OrderType[trade_request.order_type]
+        position_action_enum = PositionAction[trade_request.position_action]
+        
         order_id = await accounts_service.place_trade(
             account_name=trade_request.account_name,
             connector_name=trade_request.connector_name,
             trading_pair=trade_request.trading_pair,
-            trade_type=trade_request.trade_type,
+            trade_type=trade_type_enum,
             amount=trade_request.amount,
-            order_type=trade_request.order_type,
+            order_type=order_type_enum,
             price=trade_request.price,
-            position_action=trade_request.position_action,
+            position_action=position_action_enum,
             market_data_manager=market_data_manager
         )
         
