@@ -118,6 +118,9 @@ async def lifespan(app: FastAPI):
     # Stop market data feed manager (which will stop all feeds)
     market_data_feed_manager.stop()
     
+    # Clean up docker service
+    docker_service.cleanup()
+    
     # Close database connections
     await accounts_service.db_manager.close()
 
