@@ -75,43 +75,47 @@ async def get_database_summary(db_path: str):
 @router.get("/{db_path:path}/performance")
 async def get_database_performance(db_path: str):
     """
-    Get detailed performance analysis for a bot database.
+    Get trade-based performance analysis for a bot database.
     
     Args:
         db_path: Full path to the database file
         
     Returns:
-        Detailed performance metrics including PnL, sharpe ratio, etc.
+        Trade-based performance metrics with rolling calculations
     """
     try:
         db = HummingbotDatabase(db_path)
         
-        # Get executors data
-        executors = db.get_executors_data()
+        # Use new trade-based performance calculation
+        performance_data = db.calculate_trade_based_performance()
         
-        if len(executors) == 0:
+        if len(performance_data) == 0:
             return {
                 "db_path": db_path,
-                "error": "No executors found in database",
-                "results": {}
+                "error": "No trades found in database",
+                "performance_data": []
             }
         
-        # Convert to performance data source
-        executors_dict = executors.to_dict('records')
-        data_source = PerformanceDataSource(executors_dict)
+        # Convert to records for JSON response
+        performance_records = performance_data.to_dict('records')
         
-        # Calculate performance
-        backtesting_engine = BacktestingEngineBase()
-        executor_info_list = data_source.executor_info_list
-        results = backtesting_engine.summarize_results(executor_info_list)
-        
-        # Clean up results
-        results["sharpe_ratio"] = results["sharpe_ratio"] if results["sharpe_ratio"] is not None else 0
+        # Calculate summary statistics
+        final_row = performance_data.iloc[-1] if len(performance_data) > 0 else {}
+        summary = {
+            "total_trades": len(performance_data),
+            "final_net_pnl_quote": float(final_row.get('net_pnl_quote', 0)),
+            "final_realized_pnl_quote": float(final_row.get('realized_trade_pnl_quote', 0)), 
+            "final_unrealized_pnl_quote": float(final_row.get('unrealized_trade_pnl_quote', 0)),
+            "total_fees_quote": float(performance_data['fees_quote'].sum()),
+            "final_net_position": float(final_row.get('net_position', 0)),
+            "trading_pairs": performance_data['symbol'].unique().tolist(),
+            "markets": performance_data['market'].unique().tolist()
+        }
         
         return {
             "db_path": db_path,
-            "results": results,
-            "executor_count": len(executor_info_list)
+            "summary": summary,
+            "performance_data": performance_records
         }
         
     except Exception as e:
