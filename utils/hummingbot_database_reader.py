@@ -87,6 +87,104 @@ class HummingbotDatabase:
             controllers = pd.read_sql_query(text(query), session.connection())
         return controllers
 
+    def calculate_trade_based_performance(self) -> pd.DataFrame:
+        """
+        Calculate trade-based performance metrics using vectorized pandas operations.
+        
+        Returns:
+            DataFrame with rolling performance metrics calculated per trading pair.
+        """
+        # Get trade fills data
+        trades = self.get_trade_fills()
+        
+        if len(trades) == 0:
+            return pd.DataFrame()
+        
+        # Sort by timestamp to ensure proper rolling calculation
+        trades = trades.sort_values(['symbol', 'market', 'timestamp']).copy()
+        
+        # Create buy/sell indicator columns
+        trades['is_buy'] = (trades['trade_type'].str.upper() == 'BUY').astype(int)
+        trades['is_sell'] = (trades['trade_type'].str.upper() == 'SELL').astype(int)
+        
+        # Calculate buy and sell amounts and values vectorized
+        trades['buy_amount'] = trades['amount'] * trades['is_buy']
+        trades['sell_amount'] = trades['amount'] * trades['is_sell']
+        trades['buy_value'] = trades['price'] * trades['amount'] * trades['is_buy']
+        trades['sell_value'] = trades['price'] * trades['amount'] * trades['is_sell']
+        
+        # Group by symbol and market for rolling calculations
+        grouper = ['symbol', 'market']
+        
+        # Calculate cumulative volumes and values
+        trades['buy_volume'] = trades.groupby(grouper)['buy_amount'].cumsum()
+        trades['sell_volume'] = trades.groupby(grouper)['sell_amount'].cumsum()
+        trades['buy_value_cum'] = trades.groupby(grouper)['buy_value'].cumsum()
+        trades['sell_value_cum'] = trades.groupby(grouper)['sell_value'].cumsum()
+        
+        # Calculate average prices (avoid division by zero)
+        trades['buy_avg_price'] = trades['buy_value_cum'] / trades['buy_volume'].replace(0, pd.NA)
+        trades['sell_avg_price'] = trades['sell_value_cum'] / trades['sell_volume'].replace(0, pd.NA)
+        
+        # Forward fill average prices within each group to handle NaN values
+        trades['buy_avg_price'] = trades.groupby(grouper)['buy_avg_price'].ffill().fillna(0)
+        trades['sell_avg_price'] = trades.groupby(grouper)['sell_avg_price'].ffill().fillna(0)
+        
+        # Calculate net position
+        trades['net_position'] = trades['buy_volume'] - trades['sell_volume']
+        
+        # Calculate realized PnL
+        trades['realized_trade_pnl_pct'] = (
+            (trades['sell_avg_price'] - trades['buy_avg_price']) / trades['buy_avg_price']
+        ).fillna(0)
+        
+        # Matched volume for realized PnL (minimum of buy and sell volumes)
+        trades['matched_volume'] = pd.concat([trades['buy_volume'], trades['sell_volume']], axis=1).min(axis=1)
+        trades['realized_trade_pnl_quote'] = trades['realized_trade_pnl_pct'] * trades['matched_volume']
+        
+        # Calculate unrealized PnL based on position direction
+        # For long positions (net_position > 0): use current price vs buy_avg_price
+        # For short positions (net_position < 0): use sell_avg_price vs current price
+        trades['unrealized_trade_pnl_pct'] = 0.0
+        
+        # Long positions
+        long_mask = trades['net_position'] > 0
+        trades.loc[long_mask, 'unrealized_trade_pnl_pct'] = (
+            (trades.loc[long_mask, 'price'] - trades.loc[long_mask, 'buy_avg_price']) / 
+            trades.loc[long_mask, 'buy_avg_price']
+        ).fillna(0)
+        
+        # Short positions  
+        short_mask = trades['net_position'] < 0
+        trades.loc[short_mask, 'unrealized_trade_pnl_pct'] = (
+            (trades.loc[short_mask, 'sell_avg_price'] - trades.loc[short_mask, 'price']) / 
+            trades.loc[short_mask, 'sell_avg_price']
+        ).fillna(0)
+        
+        # Calculate unrealized PnL in quote currency
+        trades['unrealized_trade_pnl_quote'] = trades['unrealized_trade_pnl_pct'] * trades['net_position'].abs()
+        
+        # Fees are already in trade_fee_in_quote column
+        trades['fees_quote'] = trades['trade_fee_in_quote']
+        
+        # Calculate net PnL
+        trades['net_pnl_quote'] = (
+            trades['realized_trade_pnl_quote'] + 
+            trades['unrealized_trade_pnl_quote'] - 
+            trades['fees_quote']
+        )
+        
+        # Select and return relevant columns
+        result_columns = [
+            'timestamp', 'price', 'amount', 'trade_type', 'symbol', 'market',
+            'buy_avg_price', 'buy_volume', 'sell_avg_price', 'sell_volume',
+            'net_position', 'realized_trade_pnl_pct', 'realized_trade_pnl_quote',
+            'unrealized_trade_pnl_pct', 'unrealized_trade_pnl_quote',
+            'fees_quote', 'net_pnl_quote'
+        ]
+        
+        return trades[result_columns].sort_values('timestamp')
+
 
 
 class PerformanceDataSource:
