@@ -246,6 +246,7 @@ class ConnectorManager:
         
         # Set default position mode to HEDGE for perpetual connectors
         if "_perpetual" in connector_name:
+            await connector._update_positions()
             if PositionMode.HEDGE in connector.supported_position_modes():
                 connector.set_position_mode(PositionMode.HEDGE)
 
