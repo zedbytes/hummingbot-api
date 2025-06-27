@@ -14,18 +14,37 @@ router = APIRouter(tags=["Accounts"], prefix="/accounts")
 
 # Portfolio & Account State Monitoring
 @router.get("/portfolio/state", response_model=Dict[str, Dict[str, List[Dict]]])
-async def get_portfolio_state(accounts_service: AccountsService = Depends(get_accounts_service)):
+async def get_portfolio_state(
+    account_names: Optional[List[str]] = Query(default=None, description="Filter by account names"),
+    accounts_service: AccountsService = Depends(get_accounts_service)
+):
     """
-    Get the current state of all accounts portfolio.
+    Get the current state of all or filtered accounts portfolio.
     
+    Args:
+        account_names: Optional list of account names to filter by
+        
     Returns:
-        Dict containing all account states with connector balances and token information
+        Dict containing account states with connector balances and token information
     """
-    return accounts_service.get_accounts_state()
+    all_states = accounts_service.get_accounts_state()
+    
+    # If no filter, return all accounts
+    if not account_names:
+        return all_states
+    
+    # Filter by requested accounts
+    filtered_states = {}
+    for account_name in account_names:
+        if account_name in all_states:
+            filtered_states[account_name] = all_states[account_name]
+    
+    return filtered_states
 
 
 @router.get("/portfolio/history", response_model=PaginatedResponse)
 async def get_portfolio_history(
+    account_names: Optional[List[str]] = Query(default=None, description="Filter by account names"),
     limit: int = Query(default=100, ge=1, le=1000, description="Number of items per page"),
     cursor: str = Query(default=None, description="Cursor for next page (ISO timestamp)"),
     start_time: datetime = Query(default=None, description="Start time for filtering"),
@@ -33,15 +52,47 @@ async def get_portfolio_history(
     accounts_service: AccountsService = Depends(get_accounts_service)
 ):
     """
-    Get the historical state of all accounts portfolio with pagination.
+    Get the historical state of all or filtered accounts portfolio with pagination.
+    
+    Args:
+        account_names: Optional list of account names to filter by
+        limit: Number of items per page (1-1000)
+        cursor: Cursor for pagination (ISO timestamp)
+        start_time: Start time for filtering results
+        end_time: End time for filtering results
+        
+    Returns:
+        Paginated response with historical portfolio data
     """
     try:
-        data, next_cursor, has_more = await accounts_service.load_account_state_history(
-            limit=limit,
-            cursor=cursor,
-            start_time=start_time,
-            end_time=end_time
-        )
+        if not account_names:
+            # Get history for all accounts
+            data, next_cursor, has_more = await accounts_service.load_account_state_history(
+                limit=limit,
+                cursor=cursor,
+                start_time=start_time,
+                end_time=end_time
+            )
+        else:
+            # Get history for specific accounts - need to aggregate
+            all_data = []
+            for account_name in account_names:
+                acc_data, _, _ = await accounts_service.get_account_state_history(
+                    account_name=account_name,
+                    limit=limit,
+                    cursor=cursor,
+                    start_time=start_time,
+                    end_time=end_time
+                )
+                all_data.extend(acc_data)
+            
+            # Sort by timestamp and apply pagination
+            all_data.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+            
+            # Apply limit
+            data = all_data[:limit]
+            has_more = len(all_data) > limit
+            next_cursor = data[-1]["timestamp"] if data and has_more else None
         
         return PaginatedResponse(
             data=data,
@@ -49,122 +100,378 @@ async def get_portfolio_history(
                 "limit": limit,
                 "has_more": has_more,
                 "next_cursor": next_cursor,
-                "current_cursor": cursor
+                "current_cursor": cursor,
+                "filters": {
+                    "account_names": account_names,
+                    "start_time": start_time.isoformat() if start_time else None,
+                    "end_time": end_time.isoformat() if end_time else None
+                }
             }
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/portfolio/state/{account_name}", response_model=Dict[str, List[Dict]])
-async def get_account_portfolio_state(account_name: str, accounts_service: AccountsService = Depends(get_accounts_service)):
-    """
-    Get current portfolio state of a specific account.
-    
-    Args:
-        account_name: Name of the account to get portfolio state for
-        
-    Returns:
-        Dictionary mapping connector names to lists of token information
-        
-    Raises:
-        HTTPException: 404 if account not found
-    """
-    state = await accounts_service.get_account_current_state(account_name)
-    if not state:
-        raise HTTPException(status_code=404, detail=f"Account '{account_name}' not found")
-    return state
-
-
-@router.get("/portfolio/history/{account_name}", response_model=PaginatedResponse)
-async def get_account_portfolio_history(
-    account_name: str,
-    limit: int = Query(default=100, ge=1, le=1000, description="Number of items per page"),
-    cursor: str = Query(default=None, description="Cursor for next page (ISO timestamp)"),
-    start_time: datetime = Query(default=None, description="Start time for filtering"),
-    end_time: datetime = Query(default=None, description="End time for filtering"),
-    accounts_service: AccountsService = Depends(get_accounts_service)
-):
-    """
-    Get historical portfolio state of a specific account with pagination.
-    
-    Args:
-        account_name: Name of the account to get history for
-        limit: Number of items per page (1-1000)
-        cursor: Cursor for pagination (ISO timestamp)
-        start_time: Start time for filtering results
-        end_time: End time for filtering results
-        
-    Returns:
-        Paginated response with historical account portfolio data
-    """
-    data, next_cursor, has_more = await accounts_service.get_account_state_history(
-        account_name=account_name,
-        limit=limit,
-        cursor=cursor,
-        start_time=start_time,
-        end_time=end_time
-    )
-    
-    return PaginatedResponse(
-        data=data,
-        pagination={
-            "limit": limit,
-            "has_more": has_more,
-            "next_cursor": next_cursor,
-            "current_cursor": cursor,
-            "filters": {
-                "account_name": account_name,
-                "start_time": start_time.isoformat() if start_time else None,
-                "end_time": end_time.isoformat() if end_time else None
-            }
-        }
-    )
 
 
 @router.get("/portfolio/distribution")
-async def get_portfolio_distribution(accounts_service: AccountsService = Depends(get_accounts_service)):
+async def get_portfolio_distribution(
+    account_names: Optional[List[str]] = Query(default=None, description="Filter by account names"),
+    accounts_service: AccountsService = Depends(get_accounts_service)
+):
     """
-    Get portfolio distribution by tokens with percentages across all accounts.
+    Get portfolio distribution by tokens with percentages across all or filtered accounts.
     
+    Args:
+        account_names: Optional list of account names to filter by
+        
     Returns:
         Dictionary with token distribution including percentages, values, and breakdown by accounts/connectors
     """
-    return accounts_service.get_portfolio_distribution()
+    if not account_names:
+        # Get distribution for all accounts
+        return accounts_service.get_portfolio_distribution()
+    elif len(account_names) == 1:
+        # Single account - use existing method
+        return accounts_service.get_portfolio_distribution(account_names[0])
+    else:
+        # Multiple accounts - need to aggregate
+        aggregated_distribution = {
+            "tokens": {},
+            "total_value": 0,
+            "token_count": 0,
+            "accounts": {}
+        }
+        
+        for account_name in account_names:
+            account_dist = accounts_service.get_portfolio_distribution(account_name)
+            
+            # Skip if account doesn't exist or has error
+            if account_dist.get("error") or account_dist.get("token_count", 0) == 0:
+                continue
+            
+            # Aggregate token data
+            for token, token_data in account_dist.get("tokens", {}).items():
+                if token not in aggregated_distribution["tokens"]:
+                    aggregated_distribution["tokens"][token] = {
+                        "token": token,
+                        "value": 0,
+                        "percentage": 0,
+                        "accounts": {}
+                    }
+                
+                aggregated_distribution["tokens"][token]["value"] += token_data.get("value", 0)
+                
+                # Copy account-specific data
+                for acc_name, acc_data in token_data.get("accounts", {}).items():
+                    aggregated_distribution["tokens"][token]["accounts"][acc_name] = acc_data
+            
+            aggregated_distribution["total_value"] += account_dist.get("total_value", 0)
+            aggregated_distribution["accounts"][account_name] = account_dist.get("accounts", {}).get(account_name, {})
+        
+        # Recalculate percentages
+        total_value = aggregated_distribution["total_value"]
+        if total_value > 0:
+            for token_data in aggregated_distribution["tokens"].values():
+                token_data["percentage"] = (token_data["value"] / total_value) * 100
+        
+        aggregated_distribution["token_count"] = len(aggregated_distribution["tokens"])
+        
+        return aggregated_distribution
 
 
-@router.get("/portfolio/distribution/{account_name}")
-async def get_account_portfolio_distribution(account_name: str, accounts_service: AccountsService = Depends(get_accounts_service)):
-    """
-    Get portfolio distribution by tokens with percentages for a specific account.
-    
-    Args:
-        account_name: Name of the account to get distribution for
-        
-    Returns:
-        Dictionary with token distribution for the specified account
-        
-    Raises:
-        HTTPException: 404 if account not found
-    """
-    result = accounts_service.get_portfolio_distribution(account_name)
-    
-    # Check if account exists by looking at the distribution
-    if result.get("token_count", 0) == 0 and not result.get("error") and account_name not in accounts_service.get_accounts_state():
-        raise HTTPException(status_code=404, detail=f"Account '{account_name}' not found")
-    
-    return result
 
 
 @router.get("/portfolio/accounts-distribution")
-async def get_accounts_distribution(accounts_service: AccountsService = Depends(get_accounts_service)):
+async def get_accounts_distribution(
+    account_names: Optional[List[str]] = Query(default=None, description="Filter by account names"),
+    accounts_service: AccountsService = Depends(get_accounts_service)
+):
     """
     Get portfolio distribution by accounts with percentages.
     
+    Args:
+        account_names: Optional list of account names to filter by
+        
     Returns:
         Dictionary with account distribution including percentages, values, and breakdown by connectors
     """
-    return accounts_service.get_account_distribution()
+    all_distribution = accounts_service.get_account_distribution()
+    
+    # If no filter, return all accounts
+    if not account_names:
+        return all_distribution
+    
+    # Filter the distribution by requested accounts
+    filtered_distribution = {
+        "accounts": {},
+        "total_value": 0,
+        "account_count": 0
+    }
+    
+    for account_name in account_names:
+        if account_name in all_distribution.get("accounts", {}):
+            filtered_distribution["accounts"][account_name] = all_distribution["accounts"][account_name]
+            filtered_distribution["total_value"] += all_distribution["accounts"][account_name].get("total_value", 0)
+    
+    # Recalculate percentages
+    total_value = filtered_distribution["total_value"]
+    if total_value > 0:
+        for account_data in filtered_distribution["accounts"].values():
+            account_data["percentage"] = (account_data.get("total_value", 0) / total_value) * 100
+    
+    filtered_distribution["account_count"] = len(filtered_distribution["accounts"])
+    
+    return filtered_distribution
+
+
+@router.get("/positions", response_model=List[Dict])
+async def get_positions(
+        account_names: Optional[List[str]] = Query(default=None, description="Filter by account names"),
+        connector_names: Optional[List[str]] = Query(default=None, description="Filter by connector names"),
+        accounts_service: AccountsService = Depends(get_accounts_service)
+):
+    """
+    Get current positions across all or filtered perpetual connectors.
+
+    This endpoint fetches real-time position data directly from the connectors,
+    including unrealized PnL, leverage, funding fees, and margin information.
+
+    Args:
+        account_names: Optional list of account names to filter by
+        connector_names: Optional list of connector names to filter by
+
+    Returns:
+        List of current position dictionaries with real-time data from filtered accounts/connectors
+
+    Raises:
+        HTTPException: 500 if there's an error fetching positions
+    """
+    try:
+        all_positions = []
+        all_connectors = accounts_service.connector_manager.get_all_connectors()
+
+        # Filter accounts
+        accounts_to_check = account_names if account_names else list(all_connectors.keys())
+
+        for account_name in accounts_to_check:
+            if account_name in all_connectors:
+                # Filter connectors
+                connectors_to_check = connector_names if connector_names else list(all_connectors[account_name].keys())
+
+                for connector_name in connectors_to_check:
+                    # Only fetch positions from perpetual connectors
+                    if connector_name in all_connectors[account_name] and "_perpetual" in connector_name:
+                        try:
+                            positions = await accounts_service.get_account_positions(account_name, connector_name)
+                            all_positions.extend(positions)
+                        except Exception as e:
+                            # Log error but continue with other connectors
+                            import logging
+                            logging.warning(f"Failed to get positions for {account_name}/{connector_name}: {e}")
+
+        return all_positions
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching positions: {str(e)}")
+
+
+@router.get("/positions/snapshots", response_model=List[Dict])
+async def get_position_snapshots(
+        account_names: Optional[List[str]] = Query(default=None, description="Filter by account names"),
+        connector_names: Optional[List[str]] = Query(default=None, description="Filter by connector names"),
+        accounts_service: AccountsService = Depends(get_accounts_service)
+):
+    """
+    Get latest position snapshots from database for historical analysis.
+
+    Returns the most recent position snapshots for all or filtered accounts,
+    optionally filtered by connectors. Useful for tracking position history
+    and performance over time.
+
+    Args:
+        account_names: Optional list of account names to filter by
+        connector_names: Optional list of connector names to filter by
+
+    Returns:
+        List of latest position snapshot dictionaries from database
+
+    Raises:
+        HTTPException: 500 if there's an error fetching snapshots
+    """
+    try:
+        all_snapshots = []
+
+        # Get all accounts if not specified
+        if not account_names:
+            account_names = accounts_service.list_accounts()
+
+        for account_name in account_names:
+            try:
+                # If specific connectors are requested, fetch each separately
+                if connector_names:
+                    for connector_name in connector_names:
+                        snapshots = await accounts_service.get_position_snapshots(account_name, connector_name)
+                        all_snapshots.extend(snapshots)
+                else:
+                    # Get all snapshots for the account
+                    snapshots = await accounts_service.get_position_snapshots(account_name, None)
+                    all_snapshots.extend(snapshots)
+            except Exception as e:
+                # Log error but continue with other accounts
+                import logging
+                logging.warning(f"Failed to get position snapshots for {account_name}: {e}")
+
+        return all_snapshots
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching position snapshots: {str(e)}")
+
+
+@router.get("/funding-payments", response_model=List[Dict])
+async def get_funding_payments(
+        account_names: Optional[List[str]] = Query(default=None, description="Filter by account names"),
+        connector_names: Optional[List[str]] = Query(default=None, description="Filter by connector names"),
+        trading_pair: Optional[str] = Query(default=None, description="Filter by trading pair"),
+        limit: int = Query(default=100, ge=1, le=1000, description="Maximum number of records"),
+        accounts_service: AccountsService = Depends(get_accounts_service)
+):
+    """
+    Get funding payment history across all or filtered perpetual connectors.
+
+    This endpoint retrieves historical funding payment records including
+    funding rates, payment amounts, and position data at time of payment.
+
+    Args:
+        account_names: Optional list of account names to filter by
+        connector_names: Optional list of connector names to filter by
+        trading_pair: Optional trading pair filter
+        limit: Maximum number of records to return
+
+    Returns:
+        List of funding payment records with rates, amounts, and position data
+
+    Raises:
+        HTTPException: 500 if there's an error fetching funding payments
+    """
+    try:
+        all_funding_payments = []
+        all_connectors = accounts_service.connector_manager.get_all_connectors()
+
+        # Filter accounts
+        accounts_to_check = account_names if account_names else list(all_connectors.keys())
+
+        for account_name in accounts_to_check:
+            if account_name in all_connectors:
+                # Filter connectors
+                connectors_to_check = connector_names if connector_names else list(all_connectors[account_name].keys())
+
+                for connector_name in connectors_to_check:
+                    # Only fetch funding payments from perpetual connectors
+                    if connector_name in all_connectors[account_name] and "_perpetual" in connector_name:
+                        try:
+                            payments = await accounts_service.get_funding_payments(
+                                account_name=account_name,
+                                connector_name=connector_name,
+                                trading_pair=trading_pair,
+                                limit=limit
+                            )
+                            all_funding_payments.extend(payments)
+                        except Exception as e:
+                            # Log error but continue with other connectors
+                            import logging
+                            logging.warning(f"Failed to get funding payments for {account_name}/{connector_name}: {e}")
+
+        # Sort by timestamp (most recent first)
+        all_funding_payments.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+
+        # Apply limit to the combined results
+        return all_funding_payments[:limit]
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching funding payments: {str(e)}")
+
+
+@router.get("/funding-fees/summary", response_model=List[Dict])
+async def get_funding_fees_summary(
+        account_names: Optional[List[str]] = Query(default=None, description="Filter by account names"),
+        connector_names: Optional[List[str]] = Query(default=None, description="Filter by connector names"),
+        trading_pairs: Optional[List[str]] = Query(default=None, description="Filter by trading pairs"),
+        accounts_service: AccountsService = Depends(get_accounts_service)
+):
+    """
+    Get total funding fees summary across all or filtered perpetual connectors.
+
+    This endpoint provides aggregated funding fee information including
+    total fees paid/received, payment count, and fee currency for each
+    trading pair across the filtered accounts and connectors.
+
+    Args:
+        account_names: Optional list of account names to filter by
+        connector_names: Optional list of connector names to filter by
+        trading_pairs: Optional list of trading pairs to filter by
+
+    Returns:
+        List of funding fee summaries by trading pair with totals
+
+    Raises:
+        HTTPException: 500 if there's an error calculating fees
+    """
+    try:
+        all_fee_summaries = []
+        all_connectors = accounts_service.connector_manager.get_all_connectors()
+
+        # Filter accounts
+        accounts_to_check = account_names if account_names else list(all_connectors.keys())
+
+        for account_name in accounts_to_check:
+            if account_name in all_connectors:
+                # Filter connectors
+                connectors_to_check = connector_names if connector_names else list(all_connectors[account_name].keys())
+
+                for connector_name in connectors_to_check:
+                    # Only get fees from perpetual connectors
+                    if connector_name in all_connectors[account_name] and "_perpetual" in connector_name:
+                        # Get all trading pairs for this connector if not specified
+                        pairs_to_check = trading_pairs if trading_pairs else []
+
+                        # If no specific pairs requested, get all available pairs from funding payments
+                        if not pairs_to_check:
+                            try:
+                                # Get a sample of funding payments to find available pairs
+                                payments = await accounts_service.get_funding_payments(
+                                    account_name=account_name,
+                                    connector_name=connector_name,
+                                    limit=1000
+                                )
+                                # Extract unique trading pairs
+                                pairs_to_check = list(
+                                    set(p.get("trading_pair") for p in payments if p.get("trading_pair")))
+                            except Exception:
+                                continue
+
+                        # Get fee summary for each pair
+                        for trading_pair in pairs_to_check:
+                            try:
+                                fee_summary = await accounts_service.get_total_funding_fees(
+                                    account_name=account_name,
+                                    connector_name=connector_name,
+                                    trading_pair=trading_pair
+                                )
+                                # Add account and connector info to the summary
+                                fee_summary["account_name"] = account_name
+                                fee_summary["connector_name"] = connector_name
+                                all_fee_summaries.append(fee_summary)
+                            except Exception as e:
+                                # Log error but continue with other pairs
+                                import logging
+                                logging.warning(
+                                    f"Failed to get funding fees for {account_name}/{connector_name}/{trading_pair}: {e}")
+
+        return all_fee_summaries
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error calculating funding fees: {str(e)}")
 
 
 @router.get("/connectors", response_model=List[str])
@@ -316,260 +623,3 @@ async def add_credential(account_name: str, connector_name: str, credentials: Di
     except Exception as e:
         await accounts_service.delete_credentials(account_name, connector_name)
         raise HTTPException(status_code=400, detail=str(e))
-
-
-# Position Management Endpoints
-
-@router.get("/{account_name}/{connector_name}/positions", response_model=List[Dict])
-async def get_account_positions(
-    account_name: str,
-    connector_name: str,
-    accounts_service: AccountsService = Depends(get_accounts_service)
-):
-    """
-    Get current positions for a specific perpetual connector.
-    
-    This endpoint fetches real-time position data directly from the connector,
-    including unrealized PnL, leverage, funding fees, and margin information.
-    
-    Args:
-        account_name: Name of the account
-        connector_name: Name of the perpetual connector
-        
-    Returns:
-        List of current position dictionaries with real-time data
-        
-    Raises:
-        HTTPException: 400 if connector is not perpetual or doesn't support positions
-        HTTPException: 404 if account or connector not found
-        HTTPException: 500 if there's an error fetching positions
-    """
-    try:
-        return await accounts_service.get_account_positions(account_name, connector_name)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching positions: {str(e)}")
-
-@router.get("/{account_name}/positions/snapshots", response_model=List[Dict])
-async def get_position_snapshots(
-    account_name: str,
-    connector_name: Optional[str] = Query(default=None, description="Filter by specific connector"),
-    accounts_service: AccountsService = Depends(get_accounts_service)
-):
-    """
-    Get latest position snapshots from database for historical analysis.
-    
-    Returns the most recent position snapshots for the specified account,
-    optionally filtered by connector. Useful for tracking position history
-    and performance over time.
-    
-    Args:
-        account_name: Name of the account
-        connector_name: Optional connector name to filter results
-        
-    Returns:
-        List of latest position snapshot dictionaries from database
-        
-    Raises:
-        HTTPException: 404 if account not found
-        HTTPException: 500 if there's an error fetching snapshots
-    """
-    try:
-        return await accounts_service.get_position_snapshots(account_name, connector_name)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching position snapshots: {str(e)}")
-
-
-@router.get("/{account_name}/positions", response_model=List[Dict])
-async def get_all_account_positions(
-    account_name: str,
-    accounts_service: AccountsService = Depends(get_accounts_service)
-):
-    """
-    Get current positions across all perpetual connectors for an account.
-    
-    This endpoint aggregates real-time position data from all perpetual connectors
-    associated with the specified account, providing a complete portfolio view.
-    
-    Args:
-        account_name: Name of the account
-        
-    Returns:
-        List of position dictionaries from all perpetual connectors
-        
-    Raises:
-        HTTPException: 404 if account not found
-        HTTPException: 500 if there's an error fetching positions
-    """
-    try:
-        all_positions = []
-        
-        # Get all connectors for the account
-        all_connectors = accounts_service.connector_manager.get_all_connectors()
-        
-        if account_name in all_connectors:
-            for connector_name in all_connectors[account_name].keys():
-                # Only fetch positions from perpetual connectors
-                if "_perpetual" in connector_name:
-                    try:
-                        positions = await accounts_service.get_account_positions(account_name, connector_name)
-                        all_positions.extend(positions)
-                    except Exception as e:
-                        # Log error but continue with other connectors
-                        import logging
-                        logging.warning(f"Failed to get positions for {connector_name}: {e}")
-        
-        return all_positions
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching account positions: {str(e)}")
-
-
-# Funding Fee Management Endpoints
-
-@router.get("/{account_name}/{connector_name}/funding-payments", response_model=List[Dict])
-async def get_funding_payments(
-    account_name: str,
-    connector_name: str,
-    trading_pair: Optional[str] = Query(default=None, description="Filter by trading pair"),
-    limit: int = Query(default=100, ge=1, le=1000, description="Maximum number of records"),
-    accounts_service: AccountsService = Depends(get_accounts_service)
-):
-    """
-    Get funding payment history for a specific perpetual connector.
-    
-    This endpoint retrieves historical funding payment records including
-    funding rates, payment amounts, and position data at time of payment.
-    
-    Args:
-        account_name: Name of the account
-        connector_name: Name of the perpetual connector
-        trading_pair: Optional trading pair filter
-        limit: Maximum number of records to return
-        
-    Returns:
-        List of funding payment records with rates, amounts, and position data
-        
-    Raises:
-        HTTPException: 400 if connector is not perpetual
-        HTTPException: 404 if account or connector not found
-        HTTPException: 500 if there's an error fetching funding payments
-    """
-    try:
-        # Validate this is a perpetual connector
-        if "_perpetual" not in connector_name:
-            raise HTTPException(status_code=400, detail=f"Connector '{connector_name}' is not a perpetual connector")
-        
-        return await accounts_service.get_funding_payments(
-            account_name=account_name,
-            connector_name=connector_name,
-            trading_pair=trading_pair,
-            limit=limit
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching funding payments: {str(e)}")
-
-
-@router.get("/{account_name}/{connector_name}/funding-fees/{trading_pair}", response_model=Dict)
-async def get_total_funding_fees(
-    account_name: str,
-    connector_name: str,
-    trading_pair: str,
-    accounts_service: AccountsService = Depends(get_accounts_service)
-):
-    """
-    Get total funding fees summary for a specific trading pair.
-    
-    This endpoint provides aggregated funding fee information including
-    total fees paid/received, payment count, and fee currency.
-    
-    Args:
-        account_name: Name of the account
-        connector_name: Name of the perpetual connector
-        trading_pair: Trading pair to get fees for
-        
-    Returns:
-        Dictionary with total funding fees summary
-        
-    Raises:
-        HTTPException: 400 if connector is not perpetual
-        HTTPException: 404 if account or connector not found
-        HTTPException: 500 if there's an error calculating fees
-    """
-    try:
-        # Validate this is a perpetual connector
-        if "_perpetual" not in connector_name:
-            raise HTTPException(status_code=400, detail=f"Connector '{connector_name}' is not a perpetual connector")
-        
-        return await accounts_service.get_total_funding_fees(
-            account_name=account_name,
-            connector_name=connector_name,
-            trading_pair=trading_pair
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error calculating funding fees: {str(e)}")
-
-
-@router.get("/{account_name}/funding-payments", response_model=List[Dict])
-async def get_all_account_funding_payments(
-    account_name: str,
-    limit: int = Query(default=100, ge=1, le=1000, description="Maximum number of records"),
-    accounts_service: AccountsService = Depends(get_accounts_service)
-):
-    """
-    Get funding payment history across all perpetual connectors for an account.
-    
-    This endpoint aggregates funding payment data from all perpetual connectors
-    associated with the specified account, providing a complete funding fee view.
-    
-    Args:
-        account_name: Name of the account
-        limit: Maximum number of records to return
-        
-    Returns:
-        List of funding payment records from all perpetual connectors
-        
-    Raises:
-        HTTPException: 404 if account not found
-        HTTPException: 500 if there's an error fetching funding payments
-    """
-    try:
-        all_funding_payments = []
-        
-        # Get all connectors for the account
-        all_connectors = accounts_service.connector_manager.get_all_connectors()
-        
-        if account_name in all_connectors:
-            for connector_name in all_connectors[account_name].keys():
-                # Only fetch funding payments from perpetual connectors
-                if "_perpetual" in connector_name:
-                    try:
-                        payments = await accounts_service.get_funding_payments(
-                            account_name=account_name,
-                            connector_name=connector_name,
-                            limit=limit
-                        )
-                        all_funding_payments.extend(payments)
-                    except Exception as e:
-                        # Log error but continue with other connectors
-                        import logging
-                        logging.warning(f"Failed to get funding payments for {connector_name}: {e}")
-        
-        # Sort by timestamp (most recent first)
-        all_funding_payments.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
-        
-        # Apply limit to the combined results
-        return all_funding_payments[:limit]
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching account funding payments: {str(e)}")
-
-
-
