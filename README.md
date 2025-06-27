@@ -1,82 +1,186 @@
-# Backend API 
+# Hummingbot API
 
-## Overview
-Backend-api is a dedicated solution for managing Hummingbot instances. It offers a robust backend API to streamline the deployment, management, and interaction with Hummingbot containers. This tool is essential for administrators and developers looking to efficiently handle various aspects of Hummingbot operations.
+A comprehensive RESTful API framework for managing trading operations across multiple exchanges. The Hummingbot API provides a centralized platform to aggregate all your trading functionalities, from basic account management to sophisticated automated trading strategies.
 
-## Features
-- **Deployment File Management**: Manage files necessary for deploying new Hummingbot instances.
-- **Container Control**: Effortlessly start and stop Hummingbot containers.
-- **Archiving Options**: Securely archive containers either locally or on Amazon S3 post-removal.
-- **Direct Messaging**: Communicate with Hummingbots through the broker for effective control and coordination.
+## What is Hummingbot API?
+
+The Hummingbot API is designed to be your central hub for trading operations, offering:
+
+- **Multi-Exchange Account Management**: Create and manage multiple trading accounts across different exchanges
+- **Portfolio Monitoring**: Real-time balance tracking and portfolio distribution analysis
+- **Trade Execution**: Execute trades, manage orders, and monitor positions across all your accounts
+- **Automated Trading**: Deploy and control Hummingbot instances with automated strategies
+- **Strategy Management**: Add, configure, and manage trading strategies in real-time
+- **Complete Flexibility**: Build any trading product on top of this robust API framework
+
+Whether you're building a trading dashboard, implementing algorithmic strategies, or creating a comprehensive trading platform, the Hummingbot API provides all the tools you need.
+
+## System Dependencies
+
+The Hummingbot API requires two essential services to function properly:
+
+### 1. PostgreSQL Database
+Stores all trading data including:
+- Orders and trade history
+- Account states and balances
+- Positions and funding payments
+- Performance metrics
+
+### 2. EMQX Message Broker
+Enables real-time communication with trading bots:
+- Receives live updates from running bots
+- Sends commands to control bot execution
+- Handles real-time data streaming
+
+## Installation & Setup
+
+### Prerequisites
+- Docker and Docker Compose installed
+- Git for cloning the repository
+
+### Quick Start
+
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd backend-api
+   ```
+
+2. **Make setup script executable and run it**
+   ```bash
+   chmod +x setup.sh
+   ./setup.sh
+   ```
+
+3. **Configure your environment**
+   During setup, you'll configure several important variables:
+
+   - **Config Password**: Used to encrypt and hash API keys and credentials for security
+   - **Username & Password**: Basic authentication credentials for API access (used by dashboards and other systems)
+   - **Additional configurations**: Available in the `.env` file including:
+     - Broker configuration (EMQX settings)
+     - Database URL
+     - Market data cleanup settings
+     - AWS S3 configuration (experimental)
+     - Banned tokens list (for delisted tokens)
+
+4. **Set up monitoring (Production recommended)**
+   For production deployments, add observability through Logfire:
+   ```bash
+   export LOGFIRE_TOKEN=your_token_here
+   ```
+   Learn more: [Logfire Documentation](https://logfire.pydantic.dev/docs/)
+
+After running `setup.sh`, the required Docker images (EMQX, PostgreSQL, and Hummingbot) will be running and ready.
+
+## Running the API
+
+You have two deployment options depending on your use case:
+
+### For Users (Production/Simple Deployment)
+```bash
+./run.sh
+```
+This runs the API in a Docker container - simple and isolated.
+
+### For Developers (Development Environment)
+1. **Install Conda** (if not already installed)
+2. **Set up the development environment**
+   ```bash
+   make install
+   ```
+   This creates a Conda environment with all dependencies.
+
+3. **Run in development mode**
+   ```bash
+   ./run.sh --dev
+   ```
+   This starts the API from source with hot-reloading enabled.
 
 ## Getting Started
 
-### Development Setup
+Once the API is running, you can access it at `http://localhost:8000`
 
-1. **Initial Setup**:
-   - Run the setup script to configure environment variables and start required containers (EMQX and PostgreSQL):
-     ```bash
-     ./setup.sh
-     ```
-   - This script will set up the `.env` file and start the necessary Docker containers for the message broker and database.
+### First Steps
+1. **Visit the API Documentation**: Go to `http://localhost:8000/docs` to explore the interactive Swagger documentation
+2. **Authenticate**: Use the username and password you configured during setup
+3. **Test endpoints**: Use the Swagger interface to test API functionality
 
-2. **Development Mode**:
-   - Use the run script with the `--dev` flag to run the API from source:
-     ```bash
-     ./run.sh --dev
-     ```
-   - This will activate the conda environment and run the API with uvicorn for development with hot reload.
+## API Overview
 
-3. **Production Mode**:
-   - Use the run script without flags to run with Docker Compose:
-     ```bash
-     ./run.sh
-     ```
-   - This will start all services using Docker Compose in detached mode.
+The Hummingbot API is organized into several functional routers:
 
-### Manual Setup (Alternative)
+### =3 Docker Management (`/docker`)
+- Check running containers and images
+- Pull new Docker images
+- Start, stop, and remove containers
+- Monitor container status and health
 
-#### Conda Installation
-1. Install the environment using Conda:
-   ```bash
-   conda env create -f environment.yml
-   ```
-2. Activate the Conda environment:
-   ```bash
-   conda activate backend-api
-   ```
+### =d Account Management (`/accounts`)
+- Create and delete trading accounts
+- Add/remove exchange credentials
+- Monitor account states and balances
+- View portfolio distribution
+- Track positions and funding payments
 
-#### Running the API with Conda
-Run the API using uvicorn with the following command:
-   ```bash
-   uvicorn main:app --reload
-   ```
+### =¹ Trading Operations (`/trading`)
+- Place and cancel orders across exchanges
+- Monitor order status and execution
+- Set leverage and position modes
+- View trade history and performance
+- Real-time portfolio monitoring
 
-#### Docker Installation and Running the API
-For running the project using Docker, follow these steps:
+### > Bot Orchestration (`/bot-orchestration`)
+- Discover and manage active bots
+- Deploy new Hummingbot instances
+- Start/stop automated strategies
+- Monitor bot performance in real-time
 
-1. **Set up Environment Variables**:
-   - Execute the `setup.sh` script to configure the necessary environment variables in the `.env` file:
-     ```bash
-     ./setup.sh
-     ```
+### <› Strategy Management
+- **Controllers** (`/controllers`): Manage advanced strategy controllers
+- **Scripts** (`/scripts`): Handle traditional Hummingbot scripts
+- Create, edit, and remove strategy files
+- Configure strategy parameters
 
-2. **Build and Run with Docker Compose**:
-   - After setting up the environment variables, use Docker Compose to build and run the project:
-     ```bash
-     docker compose up --build
-     ```
+### =Ê Market Data (`/market-data`)
+- Access real-time and historical candles
+- Get trading rules and exchange information
+- Monitor funding rates
+- Stream live market data
 
-   - This command will build the Docker image and start the containers as defined in your `docker-compose.yml` file.
+### =, Backtesting (`/backtesting`)
+- Test strategies against historical data
+- Analyze strategy performance
+- Optimize parameters
 
-### Usage
-This API is designed for:
-- **Deploying Hummingbot instances**
-- **Starting/Stopping Containers**
-- **Archiving Hummingbots**
-- **Messaging with Hummingbot instances**
+### =È Analytics (`/archived-bots`)
+- Analyze performance of stopped bots
+- Generate comprehensive reports
+- Review historical trades and orders
+- Extract insights from past strategies
 
-To test these endpoints, you can use the [Swagger UI](http://localhost:8000/docs) or [Redoc](http://localhost:8000/redoc).
+## Authentication
+
+All API endpoints require HTTP Basic Authentication. Include your configured credentials in all requests:
+
+```bash
+curl -u username:password http://localhost:8000/endpoint
+```
+
+## Support & Documentation
+
+- **API Documentation**: Available at `http://localhost:8000/docs` when running
+- **Detailed Examples**: Check the `CLAUDE.md` file for comprehensive API usage examples
+- **Issues**: Report bugs and feature requests through the project's issue tracker
 
 ## Contributing
-Contributions are welcome! For support or queries, please contact us on Discord.
+
+We welcome contributions! Please ensure you:
+1. Set up the development environment using `make install`
+2. Run pre-commit hooks with `make install-pre-commit`
+3. Follow the existing code style (Black formatter with 130 character line length)
+4. Test your changes thoroughly
+
+---
+
+Ready to start trading? Deploy your first account and start exploring the powerful capabilities of the Hummingbot API!
