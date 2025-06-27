@@ -42,7 +42,7 @@ Enables real-time communication with trading bots:
 
 1. **Clone the repository**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/hummingbot/backend-api.git
    cd backend-api
    ```
 
