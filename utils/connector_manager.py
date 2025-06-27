@@ -240,15 +240,18 @@ class ConnectorManager:
         
         # Start the connector's network without order book tracker
         self._start_network_without_order_book(connector)
+
+        # Initialize symbol map
+        await connector._initialize_trading_pair_symbol_map()
         
         # Update initial balances
         await connector._update_balances()
         
         # Set default position mode to HEDGE for perpetual connectors
         if "_perpetual" in connector_name:
-            await connector._update_positions()
             if PositionMode.HEDGE in connector.supported_position_modes():
                 connector.set_position_mode(PositionMode.HEDGE)
+            await connector._update_positions()
 
         logging.info(f"Initialized connector {connector_name} for account {account_name}")
         return connector
