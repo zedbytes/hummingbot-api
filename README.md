@@ -123,7 +123,7 @@ The Hummingbot API is organized into several functional routers:
 - View portfolio distribution
 - Track positions and funding payments
 
-### =¹ Trading Operations (`/trading`)
+### =ï¿½ Trading Operations (`/trading`)
 - Place and cancel orders across exchanges
 - Monitor order status and execution
 - Set leverage and position modes
@@ -136,13 +136,13 @@ The Hummingbot API is organized into several functional routers:
 - Start/stop automated strategies
 - Monitor bot performance in real-time
 
-### <› Strategy Management
+### <ï¿½ Strategy Management
 - **Controllers** (`/controllers`): Manage advanced strategy controllers
 - **Scripts** (`/scripts`): Handle traditional Hummingbot scripts
 - Create, edit, and remove strategy files
 - Configure strategy parameters
 
-### =Ê Market Data (`/market-data`)
+### =ï¿½ Market Data (`/market-data`)
 - Access real-time and historical candles
 - Get trading rules and exchange information
 - Monitor funding rates
@@ -153,7 +153,7 @@ The Hummingbot API is organized into several functional routers:
 - Analyze strategy performance
 - Optimize parameters
 
-### =È Analytics (`/archived-bots`)
+### =ï¿½ Analytics (`/archived-bots`)
 - Analyze performance of stopped bots
 - Generate comprehensive reports
 - Review historical trades and orders
@@ -172,15 +172,6 @@ curl -u username:password http://localhost:8000/endpoint
 - **API Documentation**: Available at `http://localhost:8000/docs` when running
 - **Detailed Examples**: Check the `CLAUDE.md` file for comprehensive API usage examples
 - **Issues**: Report bugs and feature requests through the project's issue tracker
-
-## Contributing
-
-We welcome contributions! Please ensure you:
-1. Set up the development environment using `make install`
-2. Run pre-commit hooks with `make install-pre-commit`
-3. Follow the existing code style (Black formatter with 130 character line length)
-4. Test your changes thoroughly
-
 ---
 
 Ready to start trading? Deploy your first account and start exploring the powerful capabilities of the Hummingbot API!
