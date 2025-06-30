@@ -2,7 +2,6 @@ from typing import Dict, List, Optional
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Depends, Query
-from hummingbot.client.settings import AllConnectorSettings
 from starlette import status
 
 from services.accounts_service import AccountsService
@@ -472,31 +471,6 @@ async def get_funding_fees_summary(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error calculating funding fees: {str(e)}")
-
-
-@router.get("/connectors", response_model=List[str])
-async def available_connectors():
-    """
-    Get a list of all available connectors.
-
-    Returns:
-        List of connector names supported by the system
-    """
-    return list(AllConnectorSettings.get_connector_settings().keys())
-
-
-@router.get("/connector-config-map/{connector_name}", response_model=List[str])
-async def get_connector_config_map(connector_name: str, accounts_service: AccountsService = Depends(get_accounts_service)):
-    """
-    Get configuration fields required for a specific connector.
-    
-    Args:
-        connector_name: Name of the connector to get config map for
-        
-    Returns:
-        List of configuration field names required for the connector
-    """
-    return accounts_service.get_connector_config_map(connector_name)
 
 
 @router.get("/", response_model=List[str])
