@@ -1,5 +1,4 @@
 from typing import Dict, List, Optional
-from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 from hummingbot.core.data_type.common import PositionMode, TradeType, OrderType, PositionAction
@@ -7,11 +6,10 @@ from starlette import status
 
 from services.accounts_service import AccountsService
 from deps import get_accounts_service, get_market_data_feed_manager
-from models import PaginatedResponse, TradeRequest, TradeResponse
+from models import TradeRequest, TradeResponse
 from models.accounts import PositionModeRequest, LeverageRequest
 
 router = APIRouter(tags=["Trading"], prefix="/trading")
-
 
 
 # Trade Execution
@@ -67,6 +65,58 @@ async def place_trade(trade_request: TradeRequest,
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unexpected error placing trade: {str(e)}")
 
+
+
+
+@router.get("/positions", response_model=List[Dict])
+async def get_positions(
+        account_names: Optional[List[str]] = Query(default=None, description="Filter by account names"),
+        connector_names: Optional[List[str]] = Query(default=None, description="Filter by connector names"),
+        accounts_service: AccountsService = Depends(get_accounts_service)
+):
+    """
+    Get current positions across all or filtered perpetual connectors.
+
+    This endpoint fetches real-time position data directly from the connectors,
+    including unrealized PnL, leverage, funding fees, and margin information.
+
+    Args:
+        account_names: Optional list of account names to filter by
+        connector_names: Optional list of connector names to filter by
+
+    Returns:
+        List of current position dictionaries with real-time data from filtered accounts/connectors
+
+    Raises:
+        HTTPException: 500 if there's an error fetching positions
+    """
+    try:
+        all_positions = []
+        all_connectors = accounts_service.connector_manager.get_all_connectors()
+
+        # Filter accounts
+        accounts_to_check = account_names if account_names else list(all_connectors.keys())
+
+        for account_name in accounts_to_check:
+            if account_name in all_connectors:
+                # Filter connectors
+                connectors_to_check = connector_names if connector_names else list(all_connectors[account_name].keys())
+
+                for connector_name in connectors_to_check:
+                    # Only fetch positions from perpetual connectors
+                    if connector_name in all_connectors[account_name] and "_perpetual" in connector_name:
+                        try:
+                            positions = await accounts_service.get_account_positions(account_name, connector_name)
+                            all_positions.extend(positions)
+                        except Exception as e:
+                            # Log error but continue with other connectors
+                            import logging
+                            logging.warning(f"Failed to get positions for {account_name}/{connector_name}: {e}")
+
+        return all_positions
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching positions: {str(e)}")
 
 
 
@@ -559,3 +609,66 @@ async def get_supported_order_types(account_name: str, connector_name: str,
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving order types: {str(e)}")
+
+@router.get("/funding-payments", response_model=List[Dict])
+async def get_funding_payments(
+        account_names: Optional[List[str]] = Query(default=None, description="Filter by account names"),
+        connector_names: Optional[List[str]] = Query(default=None, description="Filter by connector names"),
+        trading_pair: Optional[str] = Query(default=None, description="Filter by trading pair"),
+        limit: int = Query(default=100, ge=1, le=1000, description="Maximum number of records"),
+        accounts_service: AccountsService = Depends(get_accounts_service)
+):
+    """
+    Get funding payment history across all or filtered perpetual connectors.
+
+    This endpoint retrieves historical funding payment records including
+    funding rates, payment amounts, and position data at time of payment.
+
+    Args:
+        account_names: Optional list of account names to filter by
+        connector_names: Optional list of connector names to filter by
+        trading_pair: Optional trading pair filter
+        limit: Maximum number of records to return
+
+    Returns:
+        List of funding payment records with rates, amounts, and position data
+
+    Raises:
+        HTTPException: 500 if there's an error fetching funding payments
+    """
+    try:
+        all_funding_payments = []
+        all_connectors = accounts_service.connector_manager.get_all_connectors()
+
+        # Filter accounts
+        accounts_to_check = account_names if account_names else list(all_connectors.keys())
+
+        for account_name in accounts_to_check:
+            if account_name in all_connectors:
+                # Filter connectors
+                connectors_to_check = connector_names if connector_names else list(all_connectors[account_name].keys())
+
+                for connector_name in connectors_to_check:
+                    # Only fetch funding payments from perpetual connectors
+                    if connector_name in all_connectors[account_name] and "_perpetual" in connector_name:
+                        try:
+                            payments = await accounts_service.get_funding_payments(
+                                account_name=account_name,
+                                connector_name=connector_name,
+                                trading_pair=trading_pair,
+                                limit=limit
+                            )
+                            all_funding_payments.extend(payments)
+                        except Exception as e:
+                            # Log error but continue with other connectors
+                            import logging
+                            logging.warning(f"Failed to get funding payments for {account_name}/{connector_name}: {e}")
+
+        # Sort by timestamp (most recent first)
+        all_funding_payments.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+
+        # Apply limit to the combined results
+        return all_funding_payments[:limit]
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching funding payments: {str(e)}")
