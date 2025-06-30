@@ -7,12 +7,13 @@ services:
     volumes:
       - ./bots:/backend-api/bots
       - /var/run/docker.sock:/var/run/docker.sock
+    env_file:
+      - .env
     environment:
+      # Override specific values for Docker networking
       - BROKER_HOST=emqx
-      - BROKER_PORT=1883
-      - USERNAME=admin
-      - PASSWORD=admin
       - DATABASE_URL=postgresql+asyncpg://hbot:backend-api@postgres:5432/backend_api
+      - BOTS_PATH=/backend-api/bots
     networks:
       - emqx-bridge
     depends_on:
