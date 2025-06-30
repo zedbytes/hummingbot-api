@@ -325,13 +325,13 @@ async def stop_and_archive_bot(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/create-hummingbot-instance")
-async def create_hummingbot_instance(
+@router.post("/deploy-v2-script")
+async def deploy_v2_script(
     config: V2ScriptDeployment, 
     docker_manager: DockerService = Depends(get_docker_service)
 ):
     """
-    Create a new Hummingbot instance with the specified configuration.
+    Creates and autostart a v2 script with a configuration if present.
     
     Args:
         config: Configuration for the new Hummingbot instance
