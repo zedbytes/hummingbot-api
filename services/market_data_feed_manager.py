@@ -1,9 +1,8 @@
 import asyncio
 import time
-from typing import Dict, Optional, Any, Callable, List, Set
+from typing import Dict, Optional, Callable, List
 import logging
 from enum import Enum
-from decimal import Decimal
 
 from hummingbot.data_feed.candles_feed.data_types import CandlesConfig
 from hummingbot.data_feed.market_data_provider import MarketDataProvider
