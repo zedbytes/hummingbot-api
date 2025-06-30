@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field, field_validator
 from decimal import Decimal
 from datetime import datetime
 from hummingbot.core.data_type.common import OrderType, TradeType, PositionAction
+from .pagination import PaginationParams, TimeRangePaginationParams
 
 
 class TradeRequest(BaseModel):
@@ -146,3 +147,39 @@ class OrderTypesResponse(BaseModel):
     """Response for supported order types"""
     connector: str = Field(description="Connector name")
     supported_order_types: List[str] = Field(description="List of supported order types")
+
+
+class OrderFilterRequest(TimeRangePaginationParams):
+    """Request model for filtering orders with multiple criteria"""
+    account_names: Optional[List[str]] = Field(default=None, description="List of account names to filter by")
+    connector_names: Optional[List[str]] = Field(default=None, description="List of connector names to filter by")
+    trading_pairs: Optional[List[str]] = Field(default=None, description="List of trading pairs to filter by")
+    status: Optional[str] = Field(default=None, description="Order status filter")
+
+
+class ActiveOrderFilterRequest(PaginationParams):
+    """Request model for filtering active orders"""
+    account_names: Optional[List[str]] = Field(default=None, description="List of account names to filter by")
+    connector_names: Optional[List[str]] = Field(default=None, description="List of connector names to filter by")
+    trading_pairs: Optional[List[str]] = Field(default=None, description="List of trading pairs to filter by")
+
+
+class PositionFilterRequest(PaginationParams):
+    """Request model for filtering positions"""
+    account_names: Optional[List[str]] = Field(default=None, description="List of account names to filter by")
+    connector_names: Optional[List[str]] = Field(default=None, description="List of connector names to filter by")
+
+
+class FundingPaymentFilterRequest(TimeRangePaginationParams):
+    """Request model for filtering funding payments"""
+    account_names: Optional[List[str]] = Field(default=None, description="List of account names to filter by")
+    connector_names: Optional[List[str]] = Field(default=None, description="List of connector names to filter by")
+    trading_pair: Optional[str] = Field(default=None, description="Filter by trading pair")
+
+
+class TradeFilterRequest(TimeRangePaginationParams):
+    """Request model for filtering trades"""
+    account_names: Optional[List[str]] = Field(default=None, description="List of account names to filter by")
+    connector_names: Optional[List[str]] = Field(default=None, description="List of connector names to filter by")
+    trading_pairs: Optional[List[str]] = Field(default=None, description="List of trading pairs to filter by")
+    trade_types: Optional[List[str]] = Field(default=None, description="List of trade types to filter by (BUY/SELL)")

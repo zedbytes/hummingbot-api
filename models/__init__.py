@@ -38,6 +38,11 @@ from .trading import (
     TradeInfo,
     TradingRulesInfo,
     OrderTypesResponse,
+    OrderFilterRequest,
+    ActiveOrderFilterRequest,
+    PositionFilterRequest,
+    FundingPaymentFilterRequest,
+    TradeFilterRequest,
 )
 
 # Controller models
@@ -156,6 +161,11 @@ __all__ = [
     "TradeInfo",
     "TradingRulesInfo",
     "OrderTypesResponse",
+    "OrderFilterRequest",
+    "ActiveOrderFilterRequest",
+    "PositionFilterRequest",
+    "FundingPaymentFilterRequest",
+    "TradeFilterRequest",
     # Controller models
     "ControllerType",
     "Controller",
@@ -185,7 +195,7 @@ __all__ = [
     "BacktestingConfig",
     # Pagination models
     "PaginatedResponse",
-    "PaginationParams", 
+    "PaginationParams",
     "TimeRangePaginationParams",
     # Connector models
     "ConnectorInfo",

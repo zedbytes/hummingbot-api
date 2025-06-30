@@ -1,12 +1,13 @@
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
 from hummingbot.core.data_type.common import PositionMode, TradeType, OrderType, PositionAction
 from starlette import status
 
 from services.accounts_service import AccountsService
 from deps import get_accounts_service, get_market_data_feed_manager
-from models import TradeRequest, TradeResponse
+from models import TradeRequest, TradeResponse, OrderFilterRequest, ActiveOrderFilterRequest, PositionFilterRequest, FundingPaymentFilterRequest, TradeFilterRequest, PaginatedResponse
 from models.accounts import PositionModeRequest, LeverageRequest
 
 router = APIRouter(tags=["Trading"], prefix="/trading")
@@ -66,9 +67,14 @@ async def place_trade(trade_request: TradeRequest,
         raise HTTPException(status_code=500, detail=f"Unexpected error placing trade: {str(e)}")
 
 
+class CancelOrderRequest(BaseModel):
+    """Request model for cancelling an order"""
+    trading_pair: str
+
+
 @router.post("/{account_name}/{connector_name}/orders/{client_order_id}/cancel")
 async def cancel_order(account_name: str, connector_name: str, client_order_id: str,
-                       trading_pair: str = Query(..., description="Trading pair for the order to cancel"),
+                       request: CancelOrderRequest,
                        accounts_service: AccountsService = Depends(get_accounts_service)):
     """
     Cancel a specific order by its client order ID.
@@ -90,7 +96,7 @@ async def cancel_order(account_name: str, connector_name: str, client_order_id: 
         cancelled_order_id = await accounts_service.cancel_order(
             account_name=account_name,
             connector_name=connector_name,
-            trading_pair=trading_pair,
+            trading_pair=request.trading_pair,
             client_order_id=client_order_id
         )
         return {"message": f"Order {cancelled_order_id} cancelled successfully"}
@@ -99,14 +105,10 @@ async def cancel_order(account_name: str, connector_name: str, client_order_id: 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error cancelling order: {str(e)}")
 
-
-
-
-@router.get("/positions", response_model=List[Dict])
+@router.post("/positions", response_model=PaginatedResponse)
 async def get_positions(
-        account_names: Optional[List[str]] = Query(default=None, description="Filter by account names"),
-        connector_names: Optional[List[str]] = Query(default=None, description="Filter by connector names"),
-        accounts_service: AccountsService = Depends(get_accounts_service)
+    filter_request: PositionFilterRequest,
+    accounts_service: AccountsService = Depends(get_accounts_service)
 ):
     """
     Get current positions across all or filtered perpetual connectors.
@@ -115,11 +117,10 @@ async def get_positions(
     including unrealized PnL, leverage, funding fees, and margin information.
 
     Args:
-        account_names: Optional list of account names to filter by
-        connector_names: Optional list of connector names to filter by
+        filter_request: JSON payload with filtering criteria
 
     Returns:
-        List of current position dictionaries with real-time data from filtered accounts/connectors
+        Paginated response with position data and pagination metadata
 
     Raises:
         HTTPException: 500 if there's an error fetching positions
@@ -129,320 +130,348 @@ async def get_positions(
         all_connectors = accounts_service.connector_manager.get_all_connectors()
 
         # Filter accounts
-        accounts_to_check = account_names if account_names else list(all_connectors.keys())
+        accounts_to_check = filter_request.account_names if filter_request.account_names else list(all_connectors.keys())
 
         for account_name in accounts_to_check:
             if account_name in all_connectors:
                 # Filter connectors
-                connectors_to_check = connector_names if connector_names else list(all_connectors[account_name].keys())
+                connectors_to_check = filter_request.connector_names if filter_request.connector_names else list(all_connectors[account_name].keys())
 
                 for connector_name in connectors_to_check:
                     # Only fetch positions from perpetual connectors
                     if connector_name in all_connectors[account_name] and "_perpetual" in connector_name:
                         try:
                             positions = await accounts_service.get_account_positions(account_name, connector_name)
+                            # Add cursor-friendly identifier to each position
+                            for position in positions:
+                                position["_cursor_id"] = f"{account_name}:{connector_name}:{position.get('trading_pair', '')}"
                             all_positions.extend(positions)
                         except Exception as e:
                             # Log error but continue with other connectors
                             import logging
                             logging.warning(f"Failed to get positions for {account_name}/{connector_name}: {e}")
 
-        return all_positions
+        # Sort by cursor_id for consistent pagination
+        all_positions.sort(key=lambda x: x.get("_cursor_id", ""))
+        
+        # Apply cursor-based pagination
+        start_index = 0
+        if filter_request.cursor:
+            # Find the position after the cursor
+            for i, position in enumerate(all_positions):
+                if position.get("_cursor_id") == filter_request.cursor:
+                    start_index = i + 1
+                    break
+        
+        # Get page of results
+        end_index = start_index + filter_request.limit
+        page_positions = all_positions[start_index:end_index]
+        
+        # Determine next cursor and has_more
+        has_more = end_index < len(all_positions)
+        next_cursor = page_positions[-1].get("_cursor_id") if page_positions and has_more else None
+        
+        # Clean up cursor_id from response data
+        for position in page_positions:
+            position.pop("_cursor_id", None)
+
+        return PaginatedResponse(
+            data=page_positions,
+            pagination={
+                "limit": filter_request.limit,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+                "total_count": len(all_positions)
+            }
+        )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching positions: {str(e)}")
 
 
 
-# Order Management
-@router.get("/{account_name}/{connector_name}/orders/active", response_model=Dict[str, Dict])
-async def get_connector_active_orders(account_name: str, connector_name: str, 
-                                    accounts_service: AccountsService = Depends(get_accounts_service)):
+# Active Orders Management - Real-time from connectors
+@router.post("/orders/active", response_model=PaginatedResponse)
+async def get_active_orders(
+    filter_request: ActiveOrderFilterRequest,
+    accounts_service: AccountsService = Depends(get_accounts_service)
+):
     """
-    Get all active orders for a specific account and connector.
+    Get active (in-flight) orders across all or filtered accounts and connectors.
+
+    This endpoint fetches real-time active orders directly from the connectors' in_flight_orders property,
+    providing current order status, fill amounts, and other live order data.
     
     Args:
-        account_name: Name of the account
-        connector_name: Name of the connector
-        accounts_service: Injected accounts service
+        filter_request: JSON payload with filtering criteria
         
     Returns:
-        Dictionary mapping order IDs to order details
-        
+        Paginated response with active order data and pagination metadata
+
     Raises:
-        HTTPException: 404 if account or connector not found
+        HTTPException: 500 if there's an error fetching orders
     """
     try:
-        return await accounts_service.get_active_orders(account_name, connector_name)
-    except HTTPException:
-        raise
+        all_active_orders = []
+        all_connectors = accounts_service.connector_manager.get_all_connectors()
+
+        # Use filter request values
+        accounts_to_check = filter_request.account_names if filter_request.account_names else list(all_connectors.keys())
+
+        for account_name in accounts_to_check:
+            if account_name in all_connectors:
+                # Filter connectors
+                connectors_to_check = filter_request.connector_names if filter_request.connector_names else list(all_connectors[account_name].keys())
+
+                for connector_name in connectors_to_check:
+                    if connector_name in all_connectors[account_name]:
+                        try:
+                            connector = all_connectors[account_name][connector_name]
+                            # Get in-flight orders directly from connector
+                            in_flight_orders = connector.in_flight_orders
+                            
+                            for client_order_id, order in in_flight_orders.items():
+                                # Apply trading pair filter if specified
+                                if filter_request.trading_pairs and order.trading_pair not in filter_request.trading_pairs:
+                                    continue
+                                    
+                                # Convert to JSON format for API response
+                                order_dict = order.to_json()
+                                order_dict.update({
+                                    "account_name": account_name,
+                                    "connector_name": connector_name,
+                                    "_cursor_id": client_order_id  # Use client_order_id as cursor
+                                })
+                                all_active_orders.append(order_dict)
+                                
+                        except Exception as e:
+                            # Log error but continue with other connectors
+                            import logging
+                            logging.warning(f"Failed to get active orders for {account_name}/{connector_name}: {e}")
+
+        # Sort by cursor_id for consistent pagination
+        all_active_orders.sort(key=lambda x: x.get("_cursor_id", ""))
+        
+        # Apply cursor-based pagination
+        start_index = 0
+        if filter_request.cursor:
+            # Find the order after the cursor
+            for i, order in enumerate(all_active_orders):
+                if order.get("_cursor_id") == filter_request.cursor:
+                    start_index = i + 1
+                    break
+        
+        # Get page of results
+        end_index = start_index + filter_request.limit
+        page_orders = all_active_orders[start_index:end_index]
+        
+        # Determine next cursor and has_more
+        has_more = end_index < len(all_active_orders)
+        next_cursor = page_orders[-1].get("_cursor_id") if page_orders and has_more else None
+        
+        # Clean up cursor_id from response data
+        for order in page_orders:
+            order.pop("_cursor_id", None)
+
+        return PaginatedResponse(
+            data=page_orders,
+            pagination={
+                "limit": filter_request.limit,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+                "total_count": len(all_active_orders)
+            }
+        )
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving orders: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching active orders: {str(e)}")
 
 
-# Global Order History
-@router.get("/orders", response_model=List[Dict])
-async def get_all_orders(
-    market: Optional[str] = Query(None, description="Filter by market/connector"),
-    symbol: Optional[str] = Query(None, description="Filter by trading pair"),
-    status: Optional[str] = Query(None, description="Filter by order status"),
-    start_time: Optional[int] = Query(None, description="Start timestamp in milliseconds"),
-    end_time: Optional[int] = Query(None, description="End timestamp in milliseconds"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of orders to return"),
-    offset: int = Query(0, ge=0, description="Number of orders to skip"),
+# Historical Order Management - From registry/database
+@router.post("/orders/search", response_model=PaginatedResponse)
+async def get_orders(
+    filter_request: OrderFilterRequest,
     accounts_service: AccountsService = Depends(get_accounts_service)
 ):
     """
-    Get order history across all accounts.
+    Get historical order data across all or filtered accounts from the database/registry.
     
     Args:
-        market: Optional filter by market/connector
-        symbol: Optional filter by trading pair
-        status: Optional filter by order status
-        start_time: Optional start timestamp
-        end_time: Optional end timestamp
-        limit: Maximum number of orders to return
-        offset: Number of orders to skip
+        filter_request: JSON payload with filtering criteria
         
     Returns:
-        List of orders across all accounts
+        Paginated response with historical order data and pagination metadata
     """
-    return await accounts_service.get_orders(
-        account_name=None,  # Query all accounts
-        market=market,
-        symbol=symbol,
-        status=status,
-        start_time=start_time,
-        end_time=end_time,
-        limit=limit,
-        offset=offset,
-    )
-
-
-@router.get("/orders/active", response_model=List[Dict])
-async def get_all_active_orders(
-    market: Optional[str] = Query(None, description="Filter by market/connector"),
-    symbol: Optional[str] = Query(None, description="Filter by trading pair"),
-    accounts_service: AccountsService = Depends(get_accounts_service)
-):
-    """
-    Get active orders across all accounts.
-    
-    Args:
-        market: Optional filter by market/connector
-        symbol: Optional filter by trading pair
-        accounts_service: Injected accounts service
+    try:
+        all_orders = []
         
-    Returns:
-        List of active orders across all accounts
-    """
-    return await accounts_service.get_active_orders_history(
-        account_name=None,  # Query all accounts
-        market=market,
-        symbol=symbol,
-    )
-
-
-@router.get("/orders/summary", response_model=Dict)
-async def get_all_orders_summary(
-    start_time: Optional[int] = Query(None, description="Start timestamp in milliseconds"),
-    end_time: Optional[int] = Query(None, description="End timestamp in milliseconds"),
-    accounts_service: AccountsService = Depends(get_accounts_service)
-):
-    """
-    Get order summary statistics across all accounts.
-    
-    Args:
-        start_time: Optional start timestamp
-        end_time: Optional end timestamp
-        accounts_service: Injected accounts service
+        # Determine which accounts to query
+        if filter_request.account_names:
+            accounts_to_check = filter_request.account_names
+        else:
+            # Get all accounts
+            all_connectors = accounts_service.connector_manager.get_all_connectors()
+            accounts_to_check = list(all_connectors.keys())
         
-    Returns:
-        Order summary statistics including fill rate, volumes, etc.
-    """
-    return await accounts_service.get_orders_summary(
-        account_name=None,  # Query all accounts
-        start_time=start_time,
-        end_time=end_time,
-    )
+        # Collect orders from all specified accounts
+        for account_name in accounts_to_check:
+            try:
+                orders = await accounts_service.get_orders(
+                    account_name=account_name,
+                    market=filter_request.connector_names[0] if filter_request.connector_names and len(filter_request.connector_names) == 1 else None,
+                    symbol=filter_request.trading_pairs[0] if filter_request.trading_pairs and len(filter_request.trading_pairs) == 1 else None,
+                    status=filter_request.status,
+                    start_time=filter_request.start_time,
+                    end_time=filter_request.end_time,
+                    limit=filter_request.limit * 2,  # Get more for filtering
+                    offset=0,
+                )
+                # Add cursor-friendly identifier to each order
+                for order in orders:
+                    order["_cursor_id"] = f"{order.get('timestamp', 0)}:{order.get('client_order_id', '')}"
+                all_orders.extend(orders)
+            except Exception as e:
+                # Log error but continue with other accounts
+                import logging
+                logging.warning(f"Failed to get orders for {account_name}: {e}")
+        
+        # Apply filters for multiple values
+        if filter_request.connector_names and len(filter_request.connector_names) > 1:
+            all_orders = [order for order in all_orders if order.get('market') in filter_request.connector_names]
+        if filter_request.trading_pairs and len(filter_request.trading_pairs) > 1:
+            all_orders = [order for order in all_orders if order.get('symbol') in filter_request.trading_pairs]
+        
+        # Sort by timestamp (most recent first) and then by cursor_id for consistency
+        all_orders.sort(key=lambda x: (x.get('timestamp', 0), x.get('_cursor_id', '')), reverse=True)
+        
+        # Apply cursor-based pagination
+        start_index = 0
+        if filter_request.cursor:
+            # Find the order after the cursor
+            for i, order in enumerate(all_orders):
+                if order.get("_cursor_id") == filter_request.cursor:
+                    start_index = i + 1
+                    break
+        
+        # Get page of results
+        end_index = start_index + filter_request.limit
+        page_orders = all_orders[start_index:end_index]
+        
+        # Determine next cursor and has_more
+        has_more = end_index < len(all_orders)
+        next_cursor = page_orders[-1].get("_cursor_id") if page_orders and has_more else None
+        
+        # Clean up cursor_id from response data
+        for order in page_orders:
+            order.pop("_cursor_id", None)
+
+        return PaginatedResponse(
+            data=page_orders,
+            pagination={
+                "limit": filter_request.limit,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+                "total_count": len(all_orders)
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching orders: {str(e)}")
 
 
-# Account-Specific Order History
-@router.get("/{account_name}/orders", response_model=List[Dict])
-async def get_account_orders(
-    account_name: str,
-    connector_name: Optional[str] = Query(None, description="Filter by connector"),
-    trading_pair: Optional[str] = Query(None, description="Filter by trading pair"),
-    status: Optional[str] = Query(None, description="Filter by order status"),
-    start_time: Optional[int] = Query(None, description="Start timestamp in milliseconds"),
-    end_time: Optional[int] = Query(None, description="End timestamp in milliseconds"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of orders to return"),
-    offset: int = Query(0, ge=0, description="Number of orders to skip"),
-    accounts_service: AccountsService = Depends(get_accounts_service)
-):
-    """
-    Get order history for a specific account.
-    
-    Args:
-        account_name: Name of the account
-        connector_name: Optional filter by connector
-        trading_pair: Optional filter by trading pair
-        status: Optional filter by order status
-        start_time: Optional start timestamp
-        end_time: Optional end timestamp
-        limit: Maximum number of orders to return
-        offset: Number of orders to skip
-        accounts_service: Injected accounts service
-        
-    Returns:
-        List of orders for the account
-        
-    Raises:
-        HTTPException: 404 if account not found
-    """
-    # Verify account exists
-    state = await accounts_service.get_account_current_state(account_name)
-    if not state:
-        raise HTTPException(status_code=404, detail=f"Account '{account_name}' not found")
-    
-    orders = await accounts_service.get_orders(
-        account_name=account_name,
-        market=connector_name,
-        symbol=trading_pair,
-        status=status,
-        start_time=start_time,
-        end_time=end_time,
-        limit=limit,
-        offset=offset,
-    )
-    
-    return orders
-
-
-@router.get("/{account_name}/orders/active", response_model=List[Dict])
-async def get_account_active_orders(
-    account_name: str,
-    connector_name: Optional[str] = Query(None, description="Filter by connector"),
-    trading_pair: Optional[str] = Query(None, description="Filter by trading pair"),
-    accounts_service: AccountsService = Depends(get_accounts_service)
-):
-    """
-    Get active orders for a specific account.
-    
-    Args:
-        account_name: Name of the account
-        connector_name: Optional filter by connector
-        trading_pair: Optional filter by trading pair
-        accounts_service: Injected accounts service
-        
-    Returns:
-        List of active orders
-        
-    Raises:
-        HTTPException: 404 if account not found
-    """
-    # Verify account exists
-    state = await accounts_service.get_account_current_state(account_name)
-    if not state:
-        raise HTTPException(status_code=404, detail=f"Account '{account_name}' not found")
-    
-    orders = await accounts_service.get_active_orders_history(
-        account_name=account_name,
-        market=connector_name,
-        symbol=trading_pair,
-    )
-    
-    return orders
 
 # Trade History
-@router.get("/trades", response_model=List[Dict])
-async def get_all_trades(
-    market: Optional[str] = Query(None, description="Filter by market/connector"),
-    symbol: Optional[str] = Query(None, description="Filter by trading pair"),
-    trade_type: Optional[str] = Query(None, description="Filter by trade type (BUY/SELL)"),
-    start_time: Optional[int] = Query(None, description="Start timestamp in milliseconds"),
-    end_time: Optional[int] = Query(None, description="End timestamp in milliseconds"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of trades to return"),
-    offset: int = Query(0, ge=0, description="Number of trades to skip"),
+@router.post("/trades", response_model=PaginatedResponse)
+async def get_trades(
+    filter_request: TradeFilterRequest,
     accounts_service: AccountsService = Depends(get_accounts_service)
 ):
     """
-    Get trade history across all accounts.
+    Get trade history across all or filtered accounts with complex filtering.
     
     Args:
-        market: Optional filter by market/connector
-        symbol: Optional filter by trading pair
-        trade_type: Optional filter by trade type
-        start_time: Optional start timestamp
-        end_time: Optional end timestamp
-        limit: Maximum number of trades to return
-        offset: Number of trades to skip
-        accounts_service: Injected accounts service
+        filter_request: JSON payload with filtering criteria
         
     Returns:
-        List of trades across all accounts
+        Paginated response with trade data and pagination metadata
     """
-    return await accounts_service.get_trades(
-        account_name=None,  # Query all accounts
-        market=market,
-        symbol=symbol,
-        trade_type=trade_type,
-        start_time=start_time,
-        end_time=end_time,
-        limit=limit,
-        offset=offset,
-    )
+    try:
+        all_trades = []
+        
+        # Determine which accounts to query
+        if filter_request.account_names:
+            accounts_to_check = filter_request.account_names
+        else:
+            # Get all accounts
+            all_connectors = accounts_service.connector_manager.get_all_connectors()
+            accounts_to_check = list(all_connectors.keys())
+        
+        # Collect trades from all specified accounts
+        for account_name in accounts_to_check:
+            try:
+                trades = await accounts_service.get_trades(
+                    account_name=account_name,
+                    market=filter_request.connector_names[0] if filter_request.connector_names and len(filter_request.connector_names) == 1 else None,
+                    symbol=filter_request.trading_pairs[0] if filter_request.trading_pairs and len(filter_request.trading_pairs) == 1 else None,
+                    trade_type=filter_request.trade_types[0] if filter_request.trade_types and len(filter_request.trade_types) == 1 else None,
+                    start_time=filter_request.start_time,
+                    end_time=filter_request.end_time,
+                    limit=filter_request.limit * 2,  # Get more for filtering
+                    offset=0,
+                )
+                # Add cursor-friendly identifier to each trade
+                for trade in trades:
+                    trade["_cursor_id"] = f"{trade.get('timestamp', 0)}:{trade.get('trade_id', '')}"
+                all_trades.extend(trades)
+            except Exception as e:
+                # Log error but continue with other accounts
+                import logging
+                logging.warning(f"Failed to get trades for {account_name}: {e}")
+        
+        # Apply filters for multiple values
+        if filter_request.connector_names and len(filter_request.connector_names) > 1:
+            all_trades = [trade for trade in all_trades if trade.get('market') in filter_request.connector_names]
+        if filter_request.trading_pairs and len(filter_request.trading_pairs) > 1:
+            all_trades = [trade for trade in all_trades if trade.get('symbol') in filter_request.trading_pairs]
+        if filter_request.trade_types and len(filter_request.trade_types) > 1:
+            all_trades = [trade for trade in all_trades if trade.get('trade_type') in filter_request.trade_types]
+        
+        # Sort by timestamp (most recent first) and then by cursor_id for consistency
+        all_trades.sort(key=lambda x: (x.get('timestamp', 0), x.get('_cursor_id', '')), reverse=True)
+        
+        # Apply cursor-based pagination
+        start_index = 0
+        if filter_request.cursor:
+            # Find the trade after the cursor
+            for i, trade in enumerate(all_trades):
+                if trade.get("_cursor_id") == filter_request.cursor:
+                    start_index = i + 1
+                    break
+        
+        # Get page of results
+        end_index = start_index + filter_request.limit
+        page_trades = all_trades[start_index:end_index]
+        
+        # Determine next cursor and has_more
+        has_more = end_index < len(all_trades)
+        next_cursor = page_trades[-1].get("_cursor_id") if page_trades and has_more else None
+        
+        # Clean up cursor_id from response data
+        for trade in page_trades:
+            trade.pop("_cursor_id", None)
+
+        return PaginatedResponse(
+            data=page_trades,
+            pagination={
+                "limit": filter_request.limit,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+                "total_count": len(all_trades)
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching trades: {str(e)}")
 
 
-@router.get("/{account_name}/trades", response_model=List[Dict])
-async def get_account_trades(
-    account_name: str,
-    connector_name: Optional[str] = Query(None, description="Filter by connector"),
-    trading_pair: Optional[str] = Query(None, description="Filter by trading pair"),
-    trade_type: Optional[str] = Query(None, description="Filter by trade type (BUY/SELL)"),
-    start_time: Optional[int] = Query(None, description="Start timestamp in milliseconds"),
-    end_time: Optional[int] = Query(None, description="End timestamp in milliseconds"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of trades to return"),
-    offset: int = Query(0, ge=0, description="Number of trades to skip"),
-    accounts_service: AccountsService = Depends(get_accounts_service)
-):
-    """
-    Get trade history for a specific account.
-    
-    Args:
-        account_name: Name of the account
-        connector_name: Optional filter by connector
-        trading_pair: Optional filter by trading pair
-        trade_type: Optional filter by trade type
-        start_time: Optional start timestamp
-        end_time: Optional end timestamp
-        limit: Maximum number of trades to return
-        offset: Number of trades to skip
-        accounts_service: Injected accounts service
-        
-    Returns:
-        List of trades for the account
-        
-    Raises:
-        HTTPException: 404 if account not found
-    """
-    # Verify account exists
-    state = await accounts_service.get_account_current_state(account_name)
-    if not state:
-        raise HTTPException(status_code=404, detail=f"Account '{account_name}' not found")
-    
-    trades = await accounts_service.get_trades(
-        account_name=account_name,
-        market=connector_name,
-        symbol=trading_pair,
-        trade_type=trade_type,
-        start_time=start_time,
-        end_time=end_time,
-        limit=limit,
-        offset=offset,
-    )
-    
-    return trades
 
 
 @router.post("/{account_name}/{connector_name}/position-mode")
@@ -545,13 +574,10 @@ async def set_leverage(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unexpected error setting leverage: {str(e)}")
 
-@router.get("/funding-payments", response_model=List[Dict])
+@router.post("/funding-payments", response_model=PaginatedResponse)
 async def get_funding_payments(
-        account_names: Optional[List[str]] = Query(default=None, description="Filter by account names"),
-        connector_names: Optional[List[str]] = Query(default=None, description="Filter by connector names"),
-        trading_pair: Optional[str] = Query(default=None, description="Filter by trading pair"),
-        limit: int = Query(default=100, ge=1, le=1000, description="Maximum number of records"),
-        accounts_service: AccountsService = Depends(get_accounts_service)
+    filter_request: FundingPaymentFilterRequest,
+    accounts_service: AccountsService = Depends(get_accounts_service)
 ):
     """
     Get funding payment history across all or filtered perpetual connectors.
@@ -560,13 +586,10 @@ async def get_funding_payments(
     funding rates, payment amounts, and position data at time of payment.
 
     Args:
-        account_names: Optional list of account names to filter by
-        connector_names: Optional list of connector names to filter by
-        trading_pair: Optional trading pair filter
-        limit: Maximum number of records to return
+        filter_request: JSON payload with filtering criteria
 
     Returns:
-        List of funding payment records with rates, amounts, and position data
+        Paginated response with funding payment data and pagination metadata
 
     Raises:
         HTTPException: 500 if there's an error fetching funding payments
@@ -576,12 +599,12 @@ async def get_funding_payments(
         all_connectors = accounts_service.connector_manager.get_all_connectors()
 
         # Filter accounts
-        accounts_to_check = account_names if account_names else list(all_connectors.keys())
+        accounts_to_check = filter_request.account_names if filter_request.account_names else list(all_connectors.keys())
 
         for account_name in accounts_to_check:
             if account_name in all_connectors:
                 # Filter connectors
-                connectors_to_check = connector_names if connector_names else list(all_connectors[account_name].keys())
+                connectors_to_check = filter_request.connector_names if filter_request.connector_names else list(all_connectors[account_name].keys())
 
                 for connector_name in connectors_to_check:
                     # Only fetch funding payments from perpetual connectors
@@ -590,20 +613,51 @@ async def get_funding_payments(
                             payments = await accounts_service.get_funding_payments(
                                 account_name=account_name,
                                 connector_name=connector_name,
-                                trading_pair=trading_pair,
-                                limit=limit
+                                trading_pair=filter_request.trading_pair,
+                                limit=filter_request.limit * 2  # Get more for pagination
                             )
+                            # Add cursor-friendly identifier to each payment
+                            for payment in payments:
+                                payment["_cursor_id"] = f"{account_name}:{connector_name}:{payment.get('timestamp', '')}:{payment.get('trading_pair', '')}"
                             all_funding_payments.extend(payments)
                         except Exception as e:
                             # Log error but continue with other connectors
                             import logging
                             logging.warning(f"Failed to get funding payments for {account_name}/{connector_name}: {e}")
 
-        # Sort by timestamp (most recent first)
-        all_funding_payments.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        # Sort by timestamp (most recent first) and then by cursor_id for consistency
+        all_funding_payments.sort(key=lambda x: (x.get("timestamp", ""), x.get("_cursor_id", "")), reverse=True)
+        
+        # Apply cursor-based pagination
+        start_index = 0
+        if filter_request.cursor:
+            # Find the payment after the cursor
+            for i, payment in enumerate(all_funding_payments):
+                if payment.get("_cursor_id") == filter_request.cursor:
+                    start_index = i + 1
+                    break
+        
+        # Get page of results
+        end_index = start_index + filter_request.limit
+        page_payments = all_funding_payments[start_index:end_index]
+        
+        # Determine next cursor and has_more
+        has_more = end_index < len(all_funding_payments)
+        next_cursor = page_payments[-1].get("_cursor_id") if page_payments and has_more else None
+        
+        # Clean up cursor_id from response data
+        for payment in page_payments:
+            payment.pop("_cursor_id", None)
 
-        # Apply limit to the combined results
-        return all_funding_payments[:limit]
+        return PaginatedResponse(
+            data=page_payments,
+            pagination={
+                "limit": filter_request.limit,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+                "total_count": len(all_funding_payments)
+            }
+        )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching funding payments: {str(e)}")
