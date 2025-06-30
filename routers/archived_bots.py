@@ -97,7 +97,7 @@ async def get_database_performance(db_path: str):
             }
         
         # Convert to records for JSON response
-        performance_records = performance_data.to_dict('records')
+        performance_records = performance_data.fillna(0).to_dict('records')
         
         # Calculate summary statistics
         final_row = performance_data.iloc[-1] if len(performance_data) > 0 else {}
@@ -149,7 +149,7 @@ async def get_database_trades(
         
         return {
             "db_path": db_path,
-            "trades": trades_page.to_dict('records'),
+            "trades": trades_page.fillna(0).to_dict('records'),
             "pagination": {
                 "total": total_trades,
                 "limit": limit,
@@ -194,7 +194,7 @@ async def get_database_orders(
         
         return {
             "db_path": db_path,
-            "orders": orders_page.to_dict('records'),
+            "orders": orders_page.fillna(0).to_dict('records'),
             "pagination": {
                 "total": total_orders,
                 "limit": limit,
@@ -223,40 +223,8 @@ async def get_database_executors(db_path: str):
         
         return {
             "db_path": db_path,
-            "executors": executors.to_dict('records'),
+            "executors": executors.fillna(0).to_dict('records'),
             "total": len(executors)
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching executors: {str(e)}")
-
-
-@router.post("/read", response_model=List[Dict[str, Any]])
-async def read_databases(db_paths: List[str]):
-    """
-    Read and extract basic information from multiple database files.
-    
-    Args:
-        db_paths: List of database file paths to read
-        
-    Returns:
-        List of database status information
-    """
-    results = []
-    for db_path in db_paths:
-        try:
-            db = HummingbotDatabase(db_path)
-            db_info = {
-                "db_name": db.db_name,
-                "db_path": db.db_path,
-                "healthy": db.status["general_status"],
-                "status": db.status,
-            }
-        except Exception as e:
-            db_info = {
-                "db_name": "",
-                "db_path": db_path,
-                "healthy": False,
-                "error": str(e)
-            }
-        results.append(db_info)
-    return results
