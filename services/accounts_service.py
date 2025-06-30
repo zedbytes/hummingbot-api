@@ -9,7 +9,7 @@ from hummingbot.client.config.config_crypt import ETHKeyFileSecretManger
 from hummingbot.core.data_type.common import OrderType, TradeType, PositionAction, PositionMode
 
 from config import settings
-from database import AsyncDatabaseManager, AccountRepository, OrderRepository, TradeRepository, PositionRepository, FundingRepository
+from database import AsyncDatabaseManager, AccountRepository, OrderRepository, TradeRepository, FundingRepository
 from services.market_data_feed_manager import MarketDataFeedManager
 from utils.connector_manager import ConnectorManager
 
