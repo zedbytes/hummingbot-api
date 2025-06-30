@@ -86,6 +86,46 @@ from .backtesting import BacktestingConfig
 # Pagination models
 from .pagination import PaginatedResponse, PaginationParams, TimeRangePaginationParams
 
+# Connector models
+from .connectors import (
+    ConnectorInfo,
+    ConnectorConfigMapResponse,
+    TradingRule,
+    ConnectorTradingRulesResponse,
+    ConnectorOrderTypesResponse,
+    ConnectorListResponse,
+)
+
+# Portfolio models
+from .portfolio import (
+    TokenBalance,
+    ConnectorBalances,
+    AccountPortfolioState,
+    PortfolioStateResponse,
+    TokenDistribution,
+    PortfolioDistributionResponse,
+    AccountDistribution,
+    AccountsDistributionResponse,
+    HistoricalPortfolioState,
+    PortfolioHistoryFilters,
+)
+
+# Archived bots models
+from .archived_bots import (
+    OrderStatus,
+    DatabaseStatus,
+    BotSummary,
+    PerformanceMetrics,
+    TradeDetail,
+    OrderDetail,
+    ExecutorInfo,
+    ArchivedBotListResponse,
+    BotPerformanceResponse,
+    TradeHistoryResponse,
+    OrderHistoryResponse,
+    ExecutorsResponse,
+)
+
 __all__ = [
     # Bot orchestration models
     "BotAction",
@@ -147,4 +187,35 @@ __all__ = [
     "PaginatedResponse",
     "PaginationParams", 
     "TimeRangePaginationParams",
+    # Connector models
+    "ConnectorInfo",
+    "ConnectorConfigMapResponse",
+    "TradingRule",
+    "ConnectorTradingRulesResponse",
+    "ConnectorOrderTypesResponse",
+    "ConnectorListResponse",
+    # Portfolio models
+    "TokenBalance",
+    "ConnectorBalances",
+    "AccountPortfolioState",
+    "PortfolioStateResponse",
+    "TokenDistribution",
+    "PortfolioDistributionResponse",
+    "AccountDistribution",
+    "AccountsDistributionResponse",
+    "HistoricalPortfolioState",
+    "PortfolioHistoryFilters",
+    # Archived bots models
+    "OrderStatus",
+    "DatabaseStatus",
+    "BotSummary",
+    "PerformanceMetrics",
+    "TradeDetail",
+    "OrderDetail",
+    "ExecutorInfo",
+    "ArchivedBotListResponse",
+    "BotPerformanceResponse",
+    "TradeHistoryResponse",
+    "OrderHistoryResponse",
+    "ExecutorsResponse",
 ]
