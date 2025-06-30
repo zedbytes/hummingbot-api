@@ -66,6 +66,40 @@ async def place_trade(trade_request: TradeRequest,
         raise HTTPException(status_code=500, detail=f"Unexpected error placing trade: {str(e)}")
 
 
+@router.post("/{account_name}/{connector_name}/orders/{client_order_id}/cancel")
+async def cancel_order(account_name: str, connector_name: str, client_order_id: str,
+                       trading_pair: str = Query(..., description="Trading pair for the order to cancel"),
+                       accounts_service: AccountsService = Depends(get_accounts_service)):
+    """
+    Cancel a specific order by its client order ID.
+
+    Args:
+        account_name: Name of the account
+        connector_name: Name of the connector
+        client_order_id: Client order ID to cancel
+        trading_pair: Trading pair for the order
+        accounts_service: Injected accounts service
+
+    Returns:
+        Success message with cancelled order ID
+
+    Raises:
+        HTTPException: 404 if account/connector not found, 500 for cancellation errors
+    """
+    try:
+        cancelled_order_id = await accounts_service.cancel_order(
+            account_name=account_name,
+            connector_name=connector_name,
+            trading_pair=trading_pair,
+            client_order_id=client_order_id
+        )
+        return {"message": f"Order {cancelled_order_id} cancelled successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error cancelling order: {str(e)}")
+
+
 
 
 @router.get("/positions", response_model=List[Dict])
@@ -144,40 +178,6 @@ async def get_connector_active_orders(account_name: str, connector_name: str,
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving orders: {str(e)}")
-
-
-@router.post("/{account_name}/{connector_name}/orders/{client_order_id}/cancel")
-async def cancel_order(account_name: str, connector_name: str, client_order_id: str, 
-                      trading_pair: str = Query(..., description="Trading pair for the order to cancel"),
-                      accounts_service: AccountsService = Depends(get_accounts_service)):
-    """
-    Cancel a specific order by its client order ID.
-    
-    Args:
-        account_name: Name of the account
-        connector_name: Name of the connector
-        client_order_id: Client order ID to cancel
-        trading_pair: Trading pair for the order
-        accounts_service: Injected accounts service
-        
-    Returns:
-        Success message with cancelled order ID
-        
-    Raises:
-        HTTPException: 404 if account/connector not found, 500 for cancellation errors
-    """
-    try:
-        cancelled_order_id = await accounts_service.cancel_order(
-            account_name=account_name,
-            connector_name=connector_name,
-            trading_pair=trading_pair,
-            client_order_id=client_order_id
-        )
-        return {"message": f"Order {cancelled_order_id} cancelled successfully"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error cancelling order: {str(e)}")
 
 
 # Global Order History
@@ -354,43 +354,6 @@ async def get_account_active_orders(
     
     return orders
 
-
-@router.get("/{account_name}/orders/summary", response_model=Dict)
-async def get_account_orders_summary(
-    account_name: str,
-    start_time: Optional[int] = Query(None, description="Start timestamp in milliseconds"),
-    end_time: Optional[int] = Query(None, description="End timestamp in milliseconds"),
-    accounts_service: AccountsService = Depends(get_accounts_service)
-):
-    """
-    Get order summary statistics for a specific account.
-    
-    Args:
-        account_name: Name of the account
-        start_time: Optional start timestamp
-        end_time: Optional end timestamp
-        accounts_service: Injected accounts service
-        
-    Returns:
-        Order summary statistics including fill rate, volumes, etc.
-        
-    Raises:
-        HTTPException: 404 if account not found
-    """
-    # Verify account exists
-    state = await accounts_service.get_account_current_state(account_name)
-    if not state:
-        raise HTTPException(status_code=404, detail=f"Account '{account_name}' not found")
-    
-    summary = await accounts_service.get_orders_summary(
-        account_name=account_name,
-        start_time=start_time,
-        end_time=end_time,
-    )
-    
-    return summary
-
-
 # Trade History
 @router.get("/trades", response_model=List[Dict])
 async def get_all_trades(
@@ -481,8 +444,6 @@ async def get_account_trades(
     
     return trades
 
-
-# Trading Rules & Configuration
 
 @router.post("/{account_name}/{connector_name}/position-mode")
 async def set_position_mode(
@@ -583,32 +544,6 @@ async def set_leverage(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unexpected error setting leverage: {str(e)}")
-
-
-@router.get("/{account_name}/{connector_name}/order-types")
-async def get_supported_order_types(account_name: str, connector_name: str, 
-                                   accounts_service: AccountsService = Depends(get_accounts_service)):
-    """
-    Get order types supported by a specific connector.
-    
-    Args:
-        account_name: Name of the account
-        connector_name: Name of the connector
-        accounts_service: Injected accounts service
-        
-    Returns:
-        List of supported order types (LIMIT, MARKET, LIMIT_MAKER)
-        
-    Raises:
-        HTTPException: 404 if account or connector not found
-    """
-    try:
-        connector = await accounts_service.get_connector_instance(account_name, connector_name)
-        return [order_type.name for order_type in connector.supported_order_types()]
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving order types: {str(e)}")
 
 @router.get("/funding-payments", response_model=List[Dict])
 async def get_funding_payments(
