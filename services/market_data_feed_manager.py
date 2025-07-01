@@ -264,7 +264,49 @@ class MarketDataFeedManager:
             self.logger.error(f"Error getting prices for {connector_name}: {e}")
             return {"error": str(e)}
     
-    def get_order_book_data(self, connector_name: str, trading_pair: str, depth: int = 10) -> Dict:
+    async def get_funding_info(self, connector_name: str, trading_pair: str) -> Dict:
+        """
+        Get funding information for a perpetual trading pair.
+        
+        Args:
+            connector_name: Name of the connector
+            trading_pair: Trading pair to get funding info for
+            
+        Returns:
+            Dictionary containing funding information
+        """
+        try:
+            # Access connector through MarketDataProvider's _rate_sources LazyDict
+            connector = self.market_data_provider._rate_sources[connector_name]
+            
+            # Check if this is a perpetual connector and has funding info support
+            if hasattr(connector, '_orderbook_ds') and connector._orderbook_ds:
+                orderbook_ds = connector._orderbook_ds
+                
+                # Get funding info from the order book data source
+                funding_info = await orderbook_ds.get_funding_info(trading_pair)
+                
+                if funding_info:
+                    result = {
+                        "trading_pair": trading_pair,
+                        "funding_rate": float(funding_info.rate) if funding_info.rate else None,
+                        "next_funding_time": float(funding_info.next_funding_utc_timestamp) if funding_info.next_funding_utc_timestamp else None,
+                        "mark_price": float(funding_info.mark_price) if funding_info.mark_price else None,
+                        "index_price": float(funding_info.index_price) if funding_info.index_price else None,
+                    }
+                    
+                    self.logger.debug(f"Retrieved funding info for {connector_name}/{trading_pair}")
+                    return result
+                else:
+                    return {"error": f"No funding info available for {trading_pair}"}
+            else:
+                return {"error": f"Funding info not supported for {connector_name}"}
+                
+        except Exception as e:
+            self.logger.error(f"Error getting funding info for {connector_name}/{trading_pair}: {e}")
+            return {"error": str(e)}
+
+    async def get_order_book_data(self, connector_name: str, trading_pair: str, depth: int = 10) -> Dict:
         """
         Get order book data using the connector's order book data source.
         
@@ -284,42 +326,118 @@ class MarketDataFeedManager:
             if hasattr(connector, '_orderbook_ds') and connector._orderbook_ds:
                 orderbook_ds = connector._orderbook_ds
                 
-                # Check if the trading pair is available in the order book data source
-                if trading_pair in orderbook_ds:
-                    orderbook = orderbook_ds[trading_pair]
-                    
-                    # Get bid and ask data
-                    bids = []
-                    asks = []
-                    
-                    # Get top bids (highest prices first)
-                    for i, (price, amount) in enumerate(orderbook.bid_entries()):
-                        if i >= depth:
-                            break
-                        bids.append({"price": float(price), "amount": float(amount)})
-                    
-                    # Get top asks (lowest prices first) 
-                    for i, (price, amount) in enumerate(orderbook.ask_entries()):
-                        if i >= depth:
-                            break
-                        asks.append({"price": float(price), "amount": float(amount)})
-                    
-                    result = {
-                        "trading_pair": trading_pair,
-                        "bids": bids,
-                        "asks": asks,
-                        "timestamp": time.time()
-                    }
-                    
-                    self.logger.debug(f"Retrieved order book for {connector_name}/{trading_pair}")
-                    return result
-                else:
-                    return {"error": f"Trading pair {trading_pair} not found in order book data source"}
+                # Get new order book using the data source method
+                order_book = await orderbook_ds.get_new_order_book(trading_pair)
+                snapshot = order_book.snapshot
+                
+                result = {
+                    "trading_pair": trading_pair,
+                    "bids": snapshot[0].loc[:(depth - 1), ["price", "amount"]].values.tolist(),
+                    "asks": snapshot[1].loc[:(depth - 1), ["price", "amount"]].values.tolist(),
+                    "timestamp": time.time()
+                }
+                
+                self.logger.debug(f"Retrieved order book for {connector_name}/{trading_pair}")
+                return result
             else:
                 return {"error": f"Order book data source not available for {connector_name}"}
                 
         except Exception as e:
             self.logger.error(f"Error getting order book for {connector_name}/{trading_pair}: {e}")
+            return {"error": str(e)}
+    
+    async def get_order_book_query_result(self, connector_name: str, trading_pair: str, is_buy: bool, **kwargs) -> Dict:
+        """
+        Generic method for order book queries using fresh OrderBook from data source.
+        
+        Args:
+            connector_name: Name of the connector
+            trading_pair: Trading pair
+            is_buy: True for buy side, False for sell side
+            **kwargs: Additional parameters for specific query types
+            
+        Returns:
+            Dictionary containing query results
+        """
+        try:
+            current_time = time.time()
+            
+            # Access connector through MarketDataProvider's _rate_sources LazyDict
+            connector = self.market_data_provider._rate_sources[connector_name]
+            
+            # Access the order book data source
+            if hasattr(connector, '_orderbook_ds') and connector._orderbook_ds:
+                orderbook_ds = connector._orderbook_ds
+                
+                # Get fresh order book using the data source method
+                order_book = await orderbook_ds.get_new_order_book(trading_pair)
+                
+                if 'volume' in kwargs:
+                    # Get price for volume
+                    result = order_book.get_price_for_volume(is_buy, kwargs['volume'])
+                    return {
+                        "trading_pair": trading_pair,
+                        "is_buy": is_buy,
+                        "query_volume": kwargs['volume'],
+                        "result_price": float(result.result_price) if result.result_price else None,
+                        "result_volume": float(result.result_volume) if result.result_volume else None,
+                        "timestamp": current_time
+                    }
+                    
+                elif 'price' in kwargs:
+                    # Get volume for price
+                    result = order_book.get_volume_for_price(is_buy, kwargs['price'])
+                    return {
+                        "trading_pair": trading_pair,
+                        "is_buy": is_buy,
+                        "query_price": kwargs['price'],
+                        "result_volume": float(result.result_volume) if result.result_volume else None,
+                        "result_price": float(result.result_price) if result.result_price else None,
+                        "timestamp": current_time
+                    }
+                    
+                elif 'quote_volume' in kwargs:
+                    # Get price for quote volume
+                    result = order_book.get_price_for_quote_volume(is_buy, kwargs['quote_volume'])
+                    return {
+                        "trading_pair": trading_pair,
+                        "is_buy": is_buy,
+                        "query_quote_volume": kwargs['quote_volume'],
+                        "result_price": float(result.result_price) if result.result_price else None,
+                        "result_volume": float(result.result_volume) if result.result_volume else None,
+                        "timestamp": current_time
+                    }
+                    
+                elif 'quote_price' in kwargs:
+                    # Get quote volume for price
+                    result = order_book.get_quote_volume_for_price(is_buy, kwargs['quote_price'])
+                    return {
+                        "trading_pair": trading_pair,
+                        "is_buy": is_buy,
+                        "query_price": kwargs['quote_price'],
+                        "result_volume": float(result.result_volume) if result.result_volume else None,
+                        "result_quote_volume": float(result.result_price) if result.result_price else None,  # For quote volume queries, result_price contains the quote volume
+                        "timestamp": current_time
+                    }
+                    
+                elif 'vwap_volume' in kwargs:
+                    # Get VWAP for volume
+                    result = order_book.get_vwap_for_volume(is_buy, kwargs['vwap_volume'])
+                    return {
+                        "trading_pair": trading_pair,
+                        "is_buy": is_buy,
+                        "query_volume": kwargs['vwap_volume'],
+                        "average_price": float(result.result_price) if result.result_price else None,
+                        "result_volume": float(result.result_volume) if result.result_volume else None,
+                        "timestamp": current_time
+                    }
+                else:
+                    return {"error": "Invalid query parameters"}
+            else:
+                return {"error": f"Order book data source not available for {connector_name}"}
+                
+        except Exception as e:
+            self.logger.error(f"Error in order book query for {connector_name}/{trading_pair}: {e}")
             return {"error": str(e)}
     
     async def _cleanup_loop(self):
