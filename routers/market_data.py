@@ -1,11 +1,18 @@
 import asyncio
-from typing import Dict, List, Optional
+import time
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Depends
 from hummingbot.data_feed.candles_feed.data_types import CandlesConfig, HistoricalCandlesConfig
 from services.market_data_feed_manager import MarketDataFeedManager
+from models import (
+    PriceRequest, PricesResponse, FundingInfoRequest, FundingInfoResponse,
+    OrderBookRequest, OrderBookResponse, OrderBookLevel,
+    VolumeForPriceRequest, PriceForVolumeRequest, QuoteVolumeForPriceRequest,
+    PriceForQuoteVolumeRequest, VWAPForVolumeRequest, OrderBookQueryResult
+)
+from deps import get_market_data_feed_manager
 
-router = APIRouter(tags=["Market"], prefix="/market-data")
+router = APIRouter(tags=["Market Data"], prefix="/market-data")
 
 
 @router.post("/candles")
@@ -119,5 +126,293 @@ async def get_market_data_settings():
         "feed_timeout": settings.market_data.feed_timeout,
         "description": "cleanup_interval: seconds between cleanup runs, feed_timeout: seconds before unused feeds expire"
     }
+
+
+# Enhanced Market Data Endpoints
+
+@router.post("/prices", response_model=PricesResponse)
+async def get_prices(
+    request: PriceRequest,
+    market_data_manager: MarketDataFeedManager = Depends(get_market_data_feed_manager)
+):
+    """
+    Get current prices for specified trading pairs from a connector.
+    
+    Args:
+        request: Price request with connector name and trading pairs
+        market_data_manager: Injected market data feed manager
+        
+    Returns:
+        Current prices for the specified trading pairs
+        
+    Raises:
+        HTTPException: 500 if there's an error fetching prices
+    """
+    try:
+        prices = await market_data_manager.get_prices(
+            request.connector_name, 
+            request.trading_pairs
+        )
+        
+        if "error" in prices:
+            raise HTTPException(status_code=500, detail=prices["error"])
+            
+        return PricesResponse(
+            connector=request.connector_name,
+            prices=prices,
+            timestamp=time.time()
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching prices: {str(e)}")
+
+
+@router.post("/funding-info", response_model=FundingInfoResponse)
+async def get_funding_info(
+    request: FundingInfoRequest,
+    market_data_manager: MarketDataFeedManager = Depends(get_market_data_feed_manager)
+):
+    """
+    Get funding information for a perpetual trading pair.
+    
+    Args:
+        request: Funding info request with connector name and trading pair
+        market_data_manager: Injected market data feed manager
+        
+    Returns:
+        Funding information including rates, timestamps, and prices
+        
+    Raises:
+        HTTPException: 400 for non-perpetual connectors, 500 for other errors
+    """
+    try:
+        funding_info = await market_data_manager.get_funding_info(
+            request.connector_name, 
+            request.trading_pair
+        )
+        
+        if "error" in funding_info:
+            if "not supported" in funding_info["error"]:
+                raise HTTPException(status_code=400, detail=funding_info["error"])
+            else:
+                raise HTTPException(status_code=500, detail=funding_info["error"])
+            
+        return FundingInfoResponse(**funding_info)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching funding info: {str(e)}")
+
+
+@router.post("/order-book", response_model=OrderBookResponse)
+async def get_order_book(
+    request: OrderBookRequest,
+    market_data_manager: MarketDataFeedManager = Depends(get_market_data_feed_manager)
+):
+    """
+    Get order book snapshot with specified depth.
+    
+    Args:
+        request: Order book request with connector, trading pair, and depth
+        market_data_manager: Injected market data feed manager
+        
+    Returns:
+        Order book snapshot with bids and asks
+        
+    Raises:
+        HTTPException: 500 if there's an error fetching order book
+    """
+    try:
+        order_book_data = await market_data_manager.get_order_book_data(
+            request.connector_name,
+            request.trading_pair,
+            request.depth
+        )
+        
+        if "error" in order_book_data:
+            raise HTTPException(status_code=500, detail=order_book_data["error"])
+            
+        # Convert to response format - data comes as [price, amount] lists
+        bids = [OrderBookLevel(price=bid[0], amount=bid[1]) for bid in order_book_data["bids"]]
+        asks = [OrderBookLevel(price=ask[0], amount=ask[1]) for ask in order_book_data["asks"]]
+        
+        return OrderBookResponse(
+            trading_pair=order_book_data["trading_pair"],
+            bids=bids,
+            asks=asks,
+            timestamp=order_book_data["timestamp"]
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching order book: {str(e)}")
+
+
+# Order Book Query Endpoints
+
+@router.post("/order-book/price-for-volume", response_model=OrderBookQueryResult)
+async def get_price_for_volume(
+    request: PriceForVolumeRequest,
+    market_data_manager: MarketDataFeedManager = Depends(get_market_data_feed_manager)
+):
+    """
+    Get the price required to fill a specific volume on the order book.
+    
+    Args:
+        request: Request with connector, trading pair, volume, and side
+        market_data_manager: Injected market data feed manager
+        
+    Returns:
+        Order book query result with price and volume information
+    """
+    try:
+        result = await market_data_manager.get_order_book_query_result(
+            request.connector_name,
+            request.trading_pair,
+            request.is_buy,
+            volume=request.volume
+        )
+        
+        if "error" in result:
+            raise HTTPException(status_code=500, detail=result["error"])
+            
+        return OrderBookQueryResult(**result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error in order book query: {str(e)}")
+
+
+@router.post("/order-book/volume-for-price", response_model=OrderBookQueryResult)
+async def get_volume_for_price(
+    request: VolumeForPriceRequest,
+    market_data_manager: MarketDataFeedManager = Depends(get_market_data_feed_manager)
+):
+    """
+    Get the volume available at a specific price level on the order book.
+    
+    Args:
+        request: Request with connector, trading pair, price, and side
+        market_data_manager: Injected market data feed manager
+        
+    Returns:
+        Order book query result with volume information
+    """
+    try:
+        result = await market_data_manager.get_order_book_query_result(
+            request.connector_name,
+            request.trading_pair,
+            request.is_buy,
+            price=request.price
+        )
+        
+        if "error" in result:
+            raise HTTPException(status_code=500, detail=result["error"])
+            
+        return OrderBookQueryResult(**result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error in order book query: {str(e)}")
+
+
+@router.post("/order-book/price-for-quote-volume", response_model=OrderBookQueryResult)
+async def get_price_for_quote_volume(
+    request: PriceForQuoteVolumeRequest,
+    market_data_manager: MarketDataFeedManager = Depends(get_market_data_feed_manager)
+):
+    """
+    Get the price required to fill a specific quote volume on the order book.
+    
+    Args:
+        request: Request with connector, trading pair, quote volume, and side
+        market_data_manager: Injected market data feed manager
+        
+    Returns:
+        Order book query result with price and volume information
+    """
+    try:
+        result = await market_data_manager.get_order_book_query_result(
+            request.connector_name,
+            request.trading_pair,
+            request.is_buy,
+            quote_volume=request.quote_volume
+        )
+        
+        if "error" in result:
+            raise HTTPException(status_code=500, detail=result["error"])
+            
+        return OrderBookQueryResult(**result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error in order book query: {str(e)}")
+
+
+@router.post("/order-book/quote-volume-for-price", response_model=OrderBookQueryResult)
+async def get_quote_volume_for_price(
+    request: QuoteVolumeForPriceRequest,
+    market_data_manager: MarketDataFeedManager = Depends(get_market_data_feed_manager)
+):
+    """
+    Get the quote volume available at a specific price level on the order book.
+    
+    Args:
+        request: Request with connector, trading pair, price, and side
+        market_data_manager: Injected market data feed manager
+        
+    Returns:
+        Order book query result with quote volume information
+    """
+    try:
+        result = await market_data_manager.get_order_book_query_result(
+            request.connector_name,
+            request.trading_pair,
+            request.is_buy,
+            quote_price=request.price
+        )
+        
+        if "error" in result:
+            raise HTTPException(status_code=500, detail=result["error"])
+            
+        return OrderBookQueryResult(**result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error in order book query: {str(e)}")
+
+
+@router.post("/order-book/vwap-for-volume", response_model=OrderBookQueryResult)
+async def get_vwap_for_volume(
+    request: VWAPForVolumeRequest,
+    market_data_manager: MarketDataFeedManager = Depends(get_market_data_feed_manager)
+):
+    """
+    Get the VWAP (Volume Weighted Average Price) for a specific volume on the order book.
+    
+    Args:
+        request: Request with connector, trading pair, volume, and side
+        market_data_manager: Injected market data feed manager
+        
+    Returns:
+        Order book query result with VWAP information
+    """
+    try:
+        result = await market_data_manager.get_order_book_query_result(
+            request.connector_name,
+            request.trading_pair,
+            request.is_buy,
+            vwap_volume=request.volume
+        )
+        
+        if "error" in result:
+            raise HTTPException(status_code=500, detail=result["error"])
+            
+        return OrderBookQueryResult(**result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error in order book query: {str(e)}")
 
 

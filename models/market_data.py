@@ -1,6 +1,7 @@
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from datetime import datetime
+from decimal import Decimal
 
 
 class CandleData(BaseModel):
@@ -48,3 +49,106 @@ class SupportedOrderTypesResponse(BaseModel):
     """Response for supported order types"""
     connector: str = Field(description="Connector name")
     supported_order_types: List[str] = Field(description="List of supported order types")
+
+
+# New models for enhanced market data functionality
+
+class PriceRequest(BaseModel):
+    """Request model for getting prices"""
+    connector_name: str = Field(description="Name of the connector")
+    trading_pairs: List[str] = Field(description="List of trading pairs to get prices for")
+
+
+class PriceData(BaseModel):
+    """Price data for a trading pair"""
+    trading_pair: str = Field(description="Trading pair")
+    price: float = Field(description="Current price")
+    timestamp: float = Field(description="Price timestamp")
+
+
+class PricesResponse(BaseModel):
+    """Response for prices data"""
+    connector: str = Field(description="Connector name")
+    prices: Dict[str, float] = Field(description="Trading pair to price mapping")
+    timestamp: float = Field(description="Response timestamp")
+
+
+class FundingInfoRequest(BaseModel):
+    """Request model for getting funding info"""
+    connector_name: str = Field(description="Name of the connector")
+    trading_pair: str = Field(description="Trading pair to get funding info for")
+
+
+class FundingInfoResponse(BaseModel):
+    """Response for funding info"""
+    trading_pair: str = Field(description="Trading pair")
+    funding_rate: Optional[float] = Field(description="Current funding rate")
+    next_funding_time: Optional[float] = Field(description="Next funding time timestamp")
+    mark_price: Optional[float] = Field(description="Mark price")
+    index_price: Optional[float] = Field(description="Index price")
+
+
+class OrderBookRequest(BaseModel):
+    """Request model for getting order book data"""
+    connector_name: str = Field(description="Name of the connector")
+    trading_pair: str = Field(description="Trading pair")
+    depth: int = Field(default=10, ge=1, le=100, description="Number of price levels to return")
+
+
+class OrderBookLevel(BaseModel):
+    """Single order book level"""
+    price: float = Field(description="Price level")
+    amount: float = Field(description="Amount at this price level")
+
+
+class OrderBookResponse(BaseModel):
+    """Response for order book data"""
+    trading_pair: str = Field(description="Trading pair")
+    bids: List[OrderBookLevel] = Field(description="Bid levels (highest to lowest)")
+    asks: List[OrderBookLevel] = Field(description="Ask levels (lowest to highest)")
+    timestamp: float = Field(description="Snapshot timestamp")
+
+
+class OrderBookQueryRequest(BaseModel):
+    """Request model for order book queries"""
+    connector_name: str = Field(description="Name of the connector")
+    trading_pair: str = Field(description="Trading pair")
+    is_buy: bool = Field(description="True for buy side, False for sell side")
+
+
+class VolumeForPriceRequest(OrderBookQueryRequest):
+    """Request model for getting volume at a specific price"""
+    price: float = Field(description="Price to query volume for")
+
+
+class PriceForVolumeRequest(OrderBookQueryRequest):
+    """Request model for getting price for a specific volume"""
+    volume: float = Field(description="Volume to query price for")
+
+
+class QuoteVolumeForPriceRequest(OrderBookQueryRequest):
+    """Request model for getting quote volume at a specific price"""
+    price: float = Field(description="Price to query quote volume for")
+
+
+class PriceForQuoteVolumeRequest(OrderBookQueryRequest):
+    """Request model for getting price for a specific quote volume"""
+    quote_volume: float = Field(description="Quote volume to query price for")
+
+
+class VWAPForVolumeRequest(OrderBookQueryRequest):
+    """Request model for getting VWAP for a specific volume"""
+    volume: float = Field(description="Volume to calculate VWAP for")
+
+
+class OrderBookQueryResult(BaseModel):
+    """Response for order book query operations"""
+    trading_pair: str = Field(description="Trading pair")
+    is_buy: bool = Field(description="Query side (buy/sell)")
+    query_volume: Optional[float] = Field(default=None, description="Queried volume")
+    query_price: Optional[float] = Field(default=None, description="Queried price")
+    result_price: Optional[float] = Field(default=None, description="Resulting price")
+    result_volume: Optional[float] = Field(default=None, description="Resulting volume")
+    result_quote_volume: Optional[float] = Field(default=None, description="Resulting quote volume")
+    average_price: Optional[float] = Field(default=None, description="Average/VWAP price")
+    timestamp: float = Field(description="Query timestamp")
