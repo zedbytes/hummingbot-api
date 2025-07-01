@@ -10,7 +10,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from hummingbot.data_feed.market_data_provider import MarketDataProvider
 from hummingbot.client.config.config_crypt import ETHKeyFileSecretManger
 
-from config import settings
 from utils.security import BackendAPISecurity
 from services.bots_orchestrator import BotsOrchestrator
 from services.accounts_service import AccountsService
@@ -34,6 +33,12 @@ from routers import (
 # Configure logging
 import logging
 
+# Load environment variables early
+load_dotenv()
+
+from config import settings
+
+
 # Set up logging configuration
 logging.basicConfig(
     level=logging.INFO,
@@ -43,8 +48,6 @@ logging.basicConfig(
 # Enable debug logging for MQTT manager
 logging.getLogger('services.mqtt_manager').setLevel(logging.DEBUG)
 
-# Load environment variables early
-load_dotenv()
 
 # Get settings from Pydantic Settings
 username = settings.security.username
