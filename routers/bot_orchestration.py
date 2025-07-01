@@ -264,15 +264,9 @@ async def stop_and_archive_bot(
     """
     try:
         # Step 1: Normalize bot name and container name
-        # Handle both "process-king" and "hummingbot-process-king" input formats
-        if bot_name.startswith("hummingbot-"):
-            # If full container name is passed, extract the bot name
-            actual_bot_name = bot_name.replace("hummingbot-", "")
-            container_name = bot_name
-        else:
-            # If just bot name is passed, construct container name
-            actual_bot_name = bot_name
-            container_name = f"hummingbot-{bot_name}"
+        # Container name is now the same as bot name (no prefix added)
+        actual_bot_name = bot_name
+        container_name = bot_name
         
         logging.info(f"Normalized bot_name: {actual_bot_name}, container_name: {container_name}")
         

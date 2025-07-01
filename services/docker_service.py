@@ -163,7 +163,7 @@ class DockerService:
 
     def create_hummingbot_instance(self, config: V2ScriptDeployment):
         bots_path = os.environ.get('BOTS_PATH', self.SOURCE_PATH)  # Default to 'SOURCE_PATH' if BOTS_PATH is not set
-        instance_name = f"hummingbot-{config.instance_name}"
+        instance_name = config.instance_name
         instance_dir = os.path.join("bots", 'instances', instance_name)
         if not os.path.exists(instance_dir):
             os.makedirs(instance_dir)
