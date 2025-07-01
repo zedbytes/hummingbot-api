@@ -2,6 +2,9 @@ import asyncio
 import logging
 from typing import Dict, List, Optional
 
+# Create module-specific logger
+logger = logging.getLogger(__name__)
+
 from hummingbot.client.config.client_config_map import ClientConfigMap
 from hummingbot.client.config.config_crypt import ETHKeyFileSecretManger
 from hummingbot.client.config.config_helpers import ClientConfigAdapter, ReadOnlyClientConfigAdapter, get_connector_class
@@ -45,14 +48,9 @@ class ConnectorManager:
         if cache_key in self._connector_cache:
             return self._connector_cache[cache_key]
         
-        try:
-            # Create connector with full initialization
-            connector = await self._create_and_initialize_connector(account_name, connector_name)
-            self._connector_cache[cache_key] = connector
-            return connector
-        except Exception as e:
-            logging.error(f"Error creating connector {connector_name} for account {account_name}: {e}")
-            raise
+        # Create connector with full initialization
+        connector = await self._create_and_initialize_connector(account_name, connector_name)
+        return connector
     
     def _create_connector(self, account_name: str, connector_name: str):
         """
@@ -68,8 +66,8 @@ class ConnectorManager:
         keys = BackendAPISecurity.api_keys(connector_name)
         
         # Debug logging
-        logging.info(f"Creating connector {connector_name} for account {account_name}")
-        logging.info(f"API keys retrieved: {list(keys.keys()) if keys else 'None'}")
+        logger.info(f"Creating connector {connector_name} for account {account_name}")
+        logger.debug(f"API keys retrieved: {list(keys.keys()) if keys else 'None'}")
         
         read_only_config = ReadOnlyClientConfigAdapter.lock_config(client_config_map)
         
@@ -81,7 +79,7 @@ class ConnectorManager:
         )
         
         # Debug logging
-        logging.info(f"Init params keys: {list(init_params.keys())}")
+        logger.debug(f"Init params keys: {list(init_params.keys())}")
         
         connector_class = get_connector_class(connector_name)
         connector = connector_class(**init_params)
@@ -184,25 +182,6 @@ class ConnectorManager:
         cache_key = f"{account_name}:{connector_name}"
         return cache_key in self._connector_cache
     
-    async def get_connector_state(self, account_name: str, connector_name: str) -> Dict[str, any]:
-        """
-        Get the current state of a connector (balances, trading rules, etc).
-        
-        :param account_name: The name of the account.
-        :param connector_name: The name of the connector.
-        :return: Dictionary containing connector state information.
-        """
-        connector = await self.get_connector(account_name, connector_name)
-        
-        return {
-            "balances": {k: float(v) for k, v in connector.get_all_balances().items()},
-            "available_balances": {k: float(connector.get_available_balance(k)) 
-                                 for k in connector.get_all_balances().keys()},
-            "is_ready": connector.ready,
-            "name": connector.name,
-            "trading_required": connector.is_trading_required
-        }
-    
     async def _create_and_initialize_connector(self, account_name: str, connector_name: str) -> ConnectorBase:
         """
         Create and fully initialize a connector with all necessary setup.
@@ -215,10 +194,23 @@ class ConnectorManager:
         """
         # Create the base connector
         connector = self._create_connector(account_name, connector_name)
-        
+        cache_key = f"{account_name}:{connector_name}"
+
+        # Initialize symbol map
+        await connector._initialize_trading_pair_symbol_map()
+
+        # Update initial balances
+        await connector._update_balances()
+
+        # Set default position mode to HEDGE for perpetual connectors
+        if "_perpetual" in connector_name:
+            if PositionMode.HEDGE in connector.supported_position_modes():
+                connector.set_position_mode(PositionMode.HEDGE)
+            await connector._update_positions()
+
+        self._connector_cache[cache_key] = connector
         # Start order tracking if db_manager is available
         if self.db_manager:
-            cache_key = f"{account_name}:{connector_name}"
             if cache_key not in self._orders_recorders:
                 # Import OrdersRecorder dynamically to avoid circular imports
                 from services.orders_recorder import OrdersRecorder
@@ -241,19 +233,7 @@ class ConnectorManager:
         # Start the connector's network without order book tracker
         self._start_network_without_order_book(connector)
 
-        # Initialize symbol map
-        await connector._initialize_trading_pair_symbol_map()
-        
-        # Update initial balances
-        await connector._update_balances()
-        
-        # Set default position mode to HEDGE for perpetual connectors
-        if "_perpetual" in connector_name:
-            if PositionMode.HEDGE in connector.supported_position_modes():
-                connector.set_position_mode(PositionMode.HEDGE)
-            await connector._update_positions()
-
-        logging.info(f"Initialized connector {connector_name} for account {account_name}")
+        logger.info(f"Initialized connector {connector_name} for account {account_name}")
         return connector
     
     def _start_network_without_order_book(self, connector: ExchangePyBase):
@@ -270,10 +250,10 @@ class ConnectorManager:
             connector._user_stream_event_listener_task = safe_ensure_future(connector._user_stream_event_listener())
             connector._lost_orders_update_task = safe_ensure_future(connector._lost_orders_update_polling_loop())
                 
-            logging.info(f"Started connector network without order book tracker")
+            logger.debug(f"Started connector network without order book tracker")
             
         except Exception as e:
-            logging.error(f"Error starting connector network without order book: {e}")
+            logger.error(f"Error starting connector network without order book: {e}")
     
     async def stop_connector(self, account_name: str, connector_name: str):
         """
@@ -289,27 +269,27 @@ class ConnectorManager:
             try:
                 await self._orders_recorders[cache_key].stop()
                 del self._orders_recorders[cache_key]
-                logging.info(f"Stopped order recorder for {account_name}/{connector_name}")
+                logger.info(f"Stopped order recorder for {account_name}/{connector_name}")
             except Exception as e:
-                logging.error(f"Error stopping order recorder for {account_name}/{connector_name}: {e}")
+                logger.error(f"Error stopping order recorder for {account_name}/{connector_name}: {e}")
         
         # Stop funding recorder if exists
         if cache_key in self._funding_recorders:
             try:
                 await self._funding_recorders[cache_key].stop()
                 del self._funding_recorders[cache_key]
-                logging.info(f"Stopped funding recorder for {account_name}/{connector_name}")
+                logger.info(f"Stopped funding recorder for {account_name}/{connector_name}")
             except Exception as e:
-                logging.error(f"Error stopping funding recorder for {account_name}/{connector_name}: {e}")
+                logger.error(f"Error stopping funding recorder for {account_name}/{connector_name}: {e}")
         
         # Stop connector network if exists
         if cache_key in self._connector_cache:
             try:
                 connector = self._connector_cache[cache_key]
                 await connector.stop_network()
-                logging.info(f"Stopped connector network for {account_name}/{connector_name}")
+                logger.info(f"Stopped connector network for {account_name}/{connector_name}")
             except Exception as e:
-                logging.error(f"Error stopping connector network for {account_name}/{connector_name}: {e}")
+                logger.error(f"Error stopping connector network for {account_name}/{connector_name}: {e}")
     
     async def stop_all_connectors(self):
         """
