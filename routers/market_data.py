@@ -187,6 +187,8 @@ async def get_funding_info(
         HTTPException: 400 for non-perpetual connectors, 500 for other errors
     """
     try:
+        if "_perpetual" not in request.connector_name.lower():
+            raise HTTPException(status_code=400, detail="Funding info is only available for perpetual trading pairs.")
         funding_info = await market_data_manager.get_funding_info(
             request.connector_name, 
             request.trading_pair
