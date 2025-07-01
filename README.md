@@ -110,54 +110,125 @@ Once the API is running, you can access it at `http://localhost:8000`
 
 The Hummingbot API is organized into several functional routers:
 
-### =3 Docker Management (`/docker`)
+### 🐳 Docker Management (`/docker`)
 - Check running containers and images
-- Pull new Docker images
+- Pull new Docker images  
 - Start, stop, and remove containers
 - Monitor container status and health
+- Clean up exited containers
+- Archive container data locally or to S3
 
-### =d Account Management (`/accounts`)
+### 💳 Account Management (`/accounts`)
 - Create and delete trading accounts
 - Add/remove exchange credentials
 - Monitor account states and balances
 - View portfolio distribution
 - Track positions and funding payments
 
-### =� Trading Operations (`/trading`)
-- Place and cancel orders across exchanges
-- Monitor order status and execution
-- Set leverage and position modes
-- View trade history and performance
-- Real-time portfolio monitoring
+### 💹 Trading Operations (`/trading`)
+**Enhanced with cursor-based pagination and comprehensive order/trade management**
+- **Order Management**: Place, cancel, and monitor orders across all exchanges
+- **Position Tracking**: Real-time positions with PnL, margin, and funding data
+- **Historical Data**: Paginated order history with advanced filtering
+- **Active Orders**: Live order monitoring from connector in-flight orders
+- **Trade History**: Complete trade execution records with filtering
+- **Funding Payments**: Historical funding payment tracking for perpetual positions
+- **Portfolio Monitoring**: Real-time balance and portfolio state tracking
+- **Position Modes**: Configure HEDGE/ONEWAY modes for perpetual trading
+- **Leverage Management**: Set and adjust leverage per trading pair
 
-### > Bot Orchestration (`/bot-orchestration`)
+### 🤖 Bot Orchestration (`/bot-orchestration`)
 - Discover and manage active bots
 - Deploy new Hummingbot instances
 - Start/stop automated strategies
 - Monitor bot performance in real-time
 
-### <� Strategy Management
+### 📋 Strategy Management
 - **Controllers** (`/controllers`): Manage advanced strategy controllers
 - **Scripts** (`/scripts`): Handle traditional Hummingbot scripts
 - Create, edit, and remove strategy files
 - Configure strategy parameters
 
-### =� Market Data (`/market-data`)
-- Access real-time and historical candles
-- Get trading rules and exchange information
-- Monitor funding rates
-- Stream live market data
+### 📊 Market Data (`/market-data`)
+**Completely enhanced with professional order book analysis and real-time data**
+- **Price Discovery**: Real-time prices for multiple trading pairs, funding rates, mark/index prices
+- **Order Book Analysis**: Live snapshots, price impact analysis, liquidity analysis, VWAP calculations
+- **Historical Data**: Real-time and historical candle data with configurable intervals
+- **Feed Management**: Active feed monitoring, automatic cleanup, lifecycle management
 
-### =, Backtesting (`/backtesting`)
+### 🔄 Backtesting (`/backtesting`)
 - Test strategies against historical data
 - Analyze strategy performance
 - Optimize parameters
 
-### =� Analytics (`/archived-bots`)
+### 📈 Analytics (`/archived-bots`)
 - Analyze performance of stopped bots
 - Generate comprehensive reports
 - Review historical trades and orders
 - Extract insights from past strategies
+
+### 🗄️ Database Management (`/databases`)
+- List and manage bot databases
+- Query trading data across multiple bots
+- Analyze historical performance
+- Database health monitoring
+
+## Configuration
+
+### Environment Variables
+Key configuration options available in `.env`:
+
+- **CONFIG_PASSWORD**: Encrypts API keys and credentials
+- **USERNAME/PASSWORD**: API authentication credentials
+- **BROKER_HOST/PORT**: EMQX message broker settings
+- **DATABASE_URL**: PostgreSQL connection string
+- **ACCOUNT_UPDATE_INTERVAL**: Balance update frequency (minutes)
+- **AWS_API_KEY/AWS_SECRET_KEY**: S3 archiving (optional)
+- **BANNED_TOKENS**: Comma-separated list of tokens to exclude
+- **LOGFIRE_TOKEN**: Observability and monitoring (production)
+
+### Bot Instance Structure
+Each bot maintains its own isolated environment:
+```
+bots/instances/hummingbot-{name}/
+├── conf/           # Configuration files
+├── data/           # Bot databases and state
+└── logs/           # Execution logs
+```
+
+## Development
+
+### Code Quality Tools
+```bash
+# Install pre-commit hooks
+make install-pre-commit
+
+# Format code (runs automatically)
+black --line-length 130 .
+isort --line-length 130 --profile black .
+```
+
+### Testing
+The API includes comprehensive backtesting capabilities. Test using:
+- Backtesting router for strategy validation
+- Swagger UI at `http://localhost:8000/docs`
+- Integration testing with live containers
+
+## Architecture
+
+### Core Components
+1. **FastAPI Application**: HTTP API with Basic Auth
+2. **Docker Service**: Container lifecycle management
+3. **Bot Orchestrator**: Strategy deployment and monitoring
+4. **Accounts Service**: Multi-exchange account management
+5. **Market Data Manager**: Real-time feeds and historical data
+6. **MQTT Broker**: Real-time bot communication
+
+### Data Models
+- Orders and trades with multi-account support
+- Portfolio states and balance tracking
+- Position management for perpetual trading
+- Historical performance analytics
 
 ## Authentication
 
