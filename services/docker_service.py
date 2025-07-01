@@ -40,12 +40,26 @@ class DockerService:
         try:
             all_containers = self.client.containers.list(filters={"status": "running"})
             if name_filter:
-                containers_info = [{"id": container.id, "name": container.name, "status": container.status} for
-                                   container in all_containers if name_filter.lower() in container.name.lower()]
+                containers_info = [
+                    {
+                        "id": container.id,
+                        "name": container.name,
+                        "status": container.status,
+                        "image": container.image.tags[0] if container.image.tags else container.image.id[:12]
+                    }
+                    for container in all_containers if name_filter.lower() in container.name.lower()
+                ]
             else:
-                containers_info = [{"id": container.id, "name": container.name, "status": container.status} for
-                                   container in all_containers]
-            return {"active_instances": containers_info}
+                containers_info = [
+                    {
+                        "id": container.id,
+                        "name": container.name,
+                        "status": container.status,
+                        "image": container.image.tags[0] if container.image.tags else container.image.id[:12]
+                    }
+                    for container in all_containers
+                ]
+            return containers_info
         except DockerException as e:
             return str(e)
 
@@ -72,14 +86,28 @@ class DockerService:
 
     def get_exited_containers(self, name_filter: str = None):
         try:
-            all_containers = self.client.containers.list(filters={"status": "exited"})
+            all_containers = self.client.containers.list(filters={"status": "exited"}, all=True)
             if name_filter:
-                containers_info = [{"id": container.id, "name": container.name, "status": container.status} for
-                                   container in all_containers if name_filter.lower() in container.name.lower()]
+                containers_info = [
+                    {
+                        "id": container.id,
+                        "name": container.name,
+                        "status": container.status,
+                        "image": container.image.tags[0] if container.image.tags else container.image.id[:12]
+                    }
+                    for container in all_containers if name_filter.lower() in container.name.lower()
+                ]
             else:
-                containers_info = [{"id": container.id, "name": container.name, "status": container.status} for
-                                   container in all_containers]
-            return {"exited_instances": containers_info}
+                containers_info = [
+                    {
+                        "id": container.id,
+                        "name": container.name,
+                        "status": container.status,
+                        "image": container.image.tags[0] if container.image.tags else container.image.id[:12]
+                    }
+                    for container in all_containers
+                ]
+            return containers_info
         except DockerException as e:
             return str(e)
 
