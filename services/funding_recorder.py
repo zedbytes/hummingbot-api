@@ -40,21 +40,21 @@ class FundingRecorder:
         for event, forwarder in self._event_pairs:
             connector.add_listener(event, forwarder)
             
-        logging.info(f"FundingRecorder started for {self.account_name}/{self.connector_name}")
+        self.logger.info(f"FundingRecorder started for {self.account_name}/{self.connector_name}")
     
     async def stop(self):
         """Stop recording funding payments"""
         if self._connector:
             for event, forwarder in self._event_pairs:
                 self._connector.remove_listener(event, forwarder)
-            logging.info(f"FundingRecorder stopped for {self.account_name}/{self.connector_name}")
+            self.logger.info(f"FundingRecorder stopped for {self.account_name}/{self.connector_name}")
     
     def _did_funding_payment(self, event_tag: int, market: ConnectorBase, event: FundingPaymentCompletedEvent):
         """Handle funding payment events - called by SourceInfoEventForwarder"""
         try:
             asyncio.create_task(self._handle_funding_payment(event))
         except Exception as e:
-            logging.error(f"Error in _did_funding_payment: {e}")
+            self.logger.error(f"Error in _did_funding_payment: {e}")
     
     async def _handle_funding_payment(self, event: FundingPaymentCompletedEvent):
         """Handle funding payment events"""
@@ -72,7 +72,7 @@ class FundingRecorder:
                             }
                             break
             except Exception as e:
-                logging.warning(f"Could not get position data for funding payment: {e}")
+                self.logger.warning(f"Could not get position data for funding payment: {e}")
         
         # Record the funding payment
         await self.record_funding_payment(event, self.account_name, self.connector_name, position_data)

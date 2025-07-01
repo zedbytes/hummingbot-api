@@ -2,6 +2,9 @@ import importlib
 import inspect
 import logging
 import os
+
+# Create module-specific logger
+logger = logging.getLogger(__name__)
 import shutil
 import sys
 from pathlib import Path
@@ -281,7 +284,7 @@ class FileSystemUtil:
                 if issubclass(cls, BaseClientModel) and cls is not BaseClientModel:
                     return cls
         except (ImportError, AttributeError, ModuleNotFoundError) as e:
-            logging.warning(f"Error loading script class for '{script_name}': {e}")
+            logger.warning(f"Error loading script class for '{script_name}': {e}")
         return None
 
     @staticmethod
@@ -307,7 +310,7 @@ class FileSystemUtil:
                         or (issubclass(cls, ControllerConfigBase) and cls is not ControllerConfigBase):
                     return cls
         except (ImportError, AttributeError, ModuleNotFoundError) as e:
-            logging.warning(f"Error loading controller class for '{controller_type}.{controller_name}': {e}")
+            logger.warning(f"Error loading controller class for '{controller_type}.{controller_name}': {e}")
         return None
 
     def ensure_file_and_dump_text(self, file_path: str, text: str) -> None:
@@ -345,7 +348,7 @@ class FileSystemUtil:
             with open(full_path, "w", encoding="utf-8") as outfile:
                 outfile.write(cm_yml_str)
         except Exception as e:
-            logging.error(f"Error writing configs to '{yml_path}': {e}", exc_info=True)
+            logger.error(f"Error writing configs to '{yml_path}': {e}", exc_info=True)
             raise
 
     def get_base_path(self) -> str:
@@ -417,7 +420,7 @@ class FileSystemUtil:
                         if db_file.endswith(".sqlite")
                     ])
             except (OSError, PermissionError) as e:
-                logging.warning(f"Error accessing database path '{db_path}': {e}")
+                logger.warning(f"Error accessing database path '{db_path}': {e}")
         return archived_databases
 
     def list_checkpoints(self, full_path: bool = False) -> List[str]:
@@ -444,7 +447,7 @@ class FileSystemUtil:
             else:
                 return checkpoint_files
         except (OSError, PermissionError) as e:
-            logging.warning(f"Error listing checkpoints in '{dir_path}': {e}")
+            logger.warning(f"Error listing checkpoints in '{dir_path}': {e}")
             return []
 
 fs_util = FileSystemUtil()

@@ -4,6 +4,9 @@ import asyncio
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 
+# Create module-specific logger
+logger = logging.getLogger(__name__)
+
 from models import StartBotAction, StopBotAction, V2ScriptDeployment, V2ControllerDeployment
 from services.bots_orchestrator import BotsOrchestrator
 from services.docker_service import DockerService
@@ -164,10 +167,10 @@ async def _background_stop_and_archive(
 ):
     """Background task to handle the stop and archive process"""
     try:
-        logging.info(f"Starting background stop-and-archive for {bot_name}")
+        logger.info(f"Starting background stop-and-archive for {bot_name}")
         
         # Step 1: Stop the bot trading process
-        logging.info(f"Stopping bot trading process for {bot_name_for_orchestrator}")
+        logger.info(f"Stopping bot trading process for {bot_name_for_orchestrator}")
         stop_response = await bots_manager.stop_bot(
             bot_name_for_orchestrator, 
             skip_order_cancellation=skip_order_cancellation,
@@ -176,11 +179,11 @@ async def _background_stop_and_archive(
         
         if not stop_response or not stop_response.get("success", False):
             error_msg = stop_response.get('error', 'Unknown error') if stop_response else 'No response from bot orchestrator'
-            logging.error(f"Failed to stop bot process: {error_msg}")
+            logger.error(f"Failed to stop bot process: {error_msg}")
             return
         
         # Step 2: Wait for graceful shutdown (15 seconds as requested)
-        logging.info(f"Waiting 15 seconds for bot {bot_name} to gracefully shutdown")
+        logger.info(f"Waiting 15 seconds for bot {bot_name} to gracefully shutdown")
         await asyncio.sleep(15)
         
         # Step 3: Stop the container with monitoring
@@ -189,34 +192,34 @@ async def _background_stop_and_archive(
         container_stopped = False
         
         for i in range(max_retries):
-            logging.info(f"Attempting to stop container {container_name} (attempt {i+1}/{max_retries})")
+            logger.info(f"Attempting to stop container {container_name} (attempt {i+1}/{max_retries})")
             docker_manager.stop_container(container_name)
                 
             # Check if container is already stopped
             container_status = docker_manager.get_container_status(container_name)
             if container_status.get("state", {}).get("status") == "exited":
                 container_stopped = True
-                logging.info(f"Container {container_name} is already stopped")
+                logger.info(f"Container {container_name} is already stopped")
                 break
                 
             await asyncio.sleep(retry_interval)
         
         if not container_stopped:
-            logging.error(f"Failed to stop container {container_name} after {max_retries} attempts")
+            logger.error(f"Failed to stop container {container_name} after {max_retries} attempts")
             return
         
         # Step 4: Archive the bot data
         instance_dir = os.path.join('bots', 'instances', container_name)
-        logging.info(f"Archiving bot data from {instance_dir}")
+        logger.info(f"Archiving bot data from {instance_dir}")
         
         try:
             if archive_locally:
                 bot_archiver.archive_locally(container_name, instance_dir)
             else:
                 bot_archiver.archive_and_upload(container_name, instance_dir, bucket_name=s3_bucket)
-            logging.info(f"Successfully archived bot data for {container_name}")
+            logger.info(f"Successfully archived bot data for {container_name}")
         except Exception as e:
-            logging.error(f"Archive failed: {str(e)}")
+            logger.error(f"Archive failed: {str(e)}")
             # Continue with removal even if archive fails
             
         # Step 5: Remove the container

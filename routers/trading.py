@@ -1,6 +1,10 @@
+import logging
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Depends
+
+# Create module-specific logger
+logger = logging.getLogger(__name__)
 from pydantic import BaseModel
 from hummingbot.core.data_type.common import PositionMode, TradeType, OrderType, PositionAction
 from starlette import status
@@ -149,7 +153,7 @@ async def get_positions(
                         except Exception as e:
                             # Log error but continue with other connectors
                             import logging
-                            logging.warning(f"Failed to get positions for {account_name}/{connector_name}: {e}")
+                            logger.warning(f"Failed to get positions for {account_name}/{connector_name}: {e}")
 
         # Sort by cursor_id for consistent pagination
         all_positions.sort(key=lambda x: x.get("_cursor_id", ""))
@@ -247,7 +251,7 @@ async def get_active_orders(
                         except Exception as e:
                             # Log error but continue with other connectors
                             import logging
-                            logging.warning(f"Failed to get active orders for {account_name}/{connector_name}: {e}")
+                            logger.warning(f"Failed to get active orders for {account_name}/{connector_name}: {e}")
 
         # Sort by cursor_id for consistent pagination
         all_active_orders.sort(key=lambda x: x.get("_cursor_id", ""))
@@ -333,7 +337,7 @@ async def get_orders(
             except Exception as e:
                 # Log error but continue with other accounts
                 import logging
-                logging.warning(f"Failed to get orders for {account_name}: {e}")
+                logger.warning(f"Failed to get orders for {account_name}: {e}")
         
         # Apply filters for multiple values
         if filter_request.connector_names and len(filter_request.connector_names) > 1:
@@ -425,7 +429,7 @@ async def get_trades(
             except Exception as e:
                 # Log error but continue with other accounts
                 import logging
-                logging.warning(f"Failed to get trades for {account_name}: {e}")
+                logger.warning(f"Failed to get trades for {account_name}: {e}")
         
         # Apply filters for multiple values
         if filter_request.connector_names and len(filter_request.connector_names) > 1:
@@ -623,7 +627,7 @@ async def get_funding_payments(
                         except Exception as e:
                             # Log error but continue with other connectors
                             import logging
-                            logging.warning(f"Failed to get funding payments for {account_name}/{connector_name}: {e}")
+                            logger.warning(f"Failed to get funding payments for {account_name}/{connector_name}: {e}")
 
         # Sort by timestamp (most recent first) and then by cursor_id for consistency
         all_funding_payments.sort(key=lambda x: (x.get("timestamp", ""), x.get("_cursor_id", "")), reverse=True)

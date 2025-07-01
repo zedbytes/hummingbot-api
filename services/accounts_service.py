@@ -1,6 +1,9 @@
 import asyncio
 import logging
 from datetime import datetime
+
+# Create module-specific logger
+logger = logging.getLogger(__name__)
 from decimal import Decimal
 from typing import Dict, List, Optional
 
@@ -82,18 +85,18 @@ class AccountsService:
         Stop all accounts service tasks and cleanup resources.
         This is the main cleanup method that should be called during application shutdown.
         """
-        logging.info("Stopping AccountsService...")
+        logger.info("Stopping AccountsService...")
         
         # Stop the account state update loop
         if self._update_account_state_task:
             self._update_account_state_task.cancel()
             self._update_account_state_task = None
-            logging.info("Stopped account state update loop")
+            logger.info("Stopped account state update loop")
         
         # Stop all connectors through the ConnectorManager
         await self.connector_manager.stop_all_connectors()
         
-        logging.info("AccountsService stopped successfully")
+        logger.info("AccountsService stopped successfully")
 
     async def update_account_state_loop(self):
         """
@@ -107,7 +110,7 @@ class AccountsService:
                 await self.update_account_state()
                 await self.dump_account_state()
             except Exception as e:
-                logging.error(f"Error updating account state: {e}")
+                logger.error(f"Error updating account state: {e}")
             finally:
                 await asyncio.sleep(self.update_account_state_interval)
 
@@ -129,7 +132,7 @@ class AccountsService:
                             await repository.save_account_state(account_name, connector_name, tokens_info)
                             
         except Exception as e:
-            logging.error(f"Error saving account state to database: {e}")
+            logger.error(f"Error saving account state to database: {e}")
             # Re-raise the exception since we no longer have a fallback
             raise
 
@@ -154,7 +157,7 @@ class AccountsService:
                     end_time=end_time
                 )
         except Exception as e:
-            logging.error(f"Error loading account state history from database: {e}")
+            logger.error(f"Error loading account state history from database: {e}")
             # Return empty result since we no longer have a fallback
             return [], None, False
 
@@ -180,9 +183,8 @@ class AccountsService:
                 if not self.connector_manager.is_connector_initialized(account_name, connector_name):
                     # Get connector will now handle all initialization
                     await self.connector_manager.get_connector(account_name, connector_name)
-                    
             except Exception as e:
-                logging.error(f"Error initializing connector {connector_name} for account {account_name}: {e}")
+                logger.error(f"Error initializing connector {connector_name} for account {account_name}: {e}")
 
 
 
@@ -198,7 +200,7 @@ class AccountsService:
                     tokens_info = await self._get_connector_tokens_info(connector, connector_name)
                     self.accounts_state[account_name][connector_name] = tokens_info
                 except Exception as e:
-                    logging.error(f"Error updating balances for connector {connector_name} in account {account_name}: {e}")
+                    logger.error(f"Error updating balances for connector {connector_name} in account {account_name}: {e}")
                     self.accounts_state[account_name][connector_name] = []
 
     async def _get_connector_tokens_info(self, connector, connector_name: str) -> List[Dict]:
@@ -232,10 +234,10 @@ class AccountsService:
             last_traded = await asyncio.wait_for(connector.get_last_traded_prices(trading_pairs=trading_pairs), timeout=timeout)
             return last_traded
         except asyncio.TimeoutError:
-            logging.error(f"Timeout getting last traded prices for trading pairs {trading_pairs}")
+            logger.error(f"Timeout getting last traded prices for trading pairs {trading_pairs}")
             return {pair: Decimal("0") for pair in trading_pairs}
         except Exception as e:
-            logging.error(f"Error getting last traded prices in connector {connector} for trading pairs {trading_pairs}: {e}")
+            logger.error(f"Error getting last traded prices in connector {connector} for trading pairs {trading_pairs}: {e}")
             return {pair: Decimal("0") for pair in trading_pairs}
 
     def get_connector_config_map(self, connector_name: str):
@@ -248,15 +250,20 @@ class AccountsService:
 
     async def add_credentials(self, account_name: str, connector_name: str, credentials: dict):
         """
-        Add or update connector credentials and initialize the connector.
+        Add or update connector credentials and initialize the connector with validation.
         
         :param account_name: The name of the account.
         :param connector_name: The name of the connector.
         :param credentials: Dictionary containing the connector credentials.
+        :raises Exception: If credentials are invalid or connector cannot be initialized.
         """
-        # Update the connector keys (this saves the credentials to file)
-        await self.connector_manager.update_connector_keys(account_name, connector_name, credentials)
-        
+        try:
+            # Update the connector keys (this saves the credentials to file and validates them)
+            await self.connector_manager.update_connector_keys(account_name, connector_name, credentials)
+        except Exception as e:
+            logger.error(f"Error adding connector credentials for account {account_name}: {e}")
+            await self.delete_credentials(account_name, connector_name)
+
     @staticmethod
     def list_accounts():
         """
@@ -348,7 +355,7 @@ class AccountsService:
                 repository = AccountRepository(session)
                 return await repository.get_account_current_state(account_name)
         except Exception as e:
-            logging.error(f"Error getting account current state: {e}")
+            logger.error(f"Error getting account current state: {e}")
             # Fallback to in-memory state
             return self.accounts_state.get(account_name, {})
     
@@ -374,7 +381,7 @@ class AccountsService:
                     end_time=end_time
                 )
         except Exception as e:
-            logging.error(f"Error getting account state history: {e}")
+            logger.error(f"Error getting account state history: {e}")
             return [], None, False
     
     async def get_connector_current_state(self, account_name: str, connector_name: str) -> List[Dict]:
@@ -388,7 +395,7 @@ class AccountsService:
                 repository = AccountRepository(session)
                 return await repository.get_connector_current_state(account_name, connector_name)
         except Exception as e:
-            logging.error(f"Error getting connector current state: {e}")
+            logger.error(f"Error getting connector current state: {e}")
             # Fallback to in-memory state
             return self.accounts_state.get(account_name, {}).get(connector_name, [])
     
@@ -416,7 +423,7 @@ class AccountsService:
                     end_time=end_time
                 )
         except Exception as e:
-            logging.error(f"Error getting connector state history: {e}")
+            logger.error(f"Error getting connector state history: {e}")
             return [], None, False
     
     async def get_all_unique_tokens(self) -> List[str]:
@@ -430,7 +437,7 @@ class AccountsService:
                 repository = AccountRepository(session)
                 return await repository.get_all_unique_tokens()
         except Exception as e:
-            logging.error(f"Error getting unique tokens: {e}")
+            logger.error(f"Error getting unique tokens: {e}")
             # Fallback to in-memory state
             tokens = set()
             for account_data in self.accounts_state.values():
@@ -450,7 +457,7 @@ class AccountsService:
                 repository = AccountRepository(session)
                 return await repository.get_token_current_state(token)
         except Exception as e:
-            logging.error(f"Error getting token current state: {e}")
+            logger.error(f"Error getting token current state: {e}")
             return []
     
     async def get_portfolio_value(self, account_name: Optional[str] = None) -> Dict[str, any]:
@@ -464,7 +471,7 @@ class AccountsService:
                 repository = AccountRepository(session)
                 return await repository.get_portfolio_value(account_name)
         except Exception as e:
-            logging.error(f"Error getting portfolio value: {e}")
+            logger.error(f"Error getting portfolio value: {e}")
             # Fallback to in-memory calculation
             portfolio = {"accounts": {}, "total_value": 0}
             
@@ -576,7 +583,7 @@ class AccountsService:
             }
             
         except Exception as e:
-            logging.error(f"Error calculating portfolio distribution: {e}")
+            logger.error(f"Error calculating portfolio distribution: {e}")
             return {
                 "total_portfolio_value": 0,
                 "token_count": 0,
@@ -642,7 +649,7 @@ class AccountsService:
             }
             
         except Exception as e:
-            logging.error(f"Error calculating account distribution: {e}")
+            logger.error(f"Error calculating account distribution: {e}")
             return {
                 "total_portfolio_value": 0,
                 "account_count": 0,
@@ -735,7 +742,7 @@ class AccountsService:
                     if trading_pair in prices and "error" not in prices:
                         price = Decimal(str(prices[trading_pair]))
                 except Exception as e:
-                    logging.error(f"Error getting market price for {trading_pair}: {e}")
+                    logger.error(f"Error getting market price for {trading_pair}: {e}")
             notional_size = price * quantized_amount
             
         if notional_size < trading_rule.min_notional_size:
@@ -767,14 +774,14 @@ class AccountsService:
                     position_action=position_action
                 )
 
-            logging.info(f"Placed {trade_type} order for {amount} {trading_pair} on {connector_name} (Account: {account_name}). Order ID: {order_id}")
+            logger.info(f"Placed {trade_type} order for {amount} {trading_pair} on {connector_name} (Account: {account_name}). Order ID: {order_id}")
             return order_id
             
         except HTTPException:
             # Re-raise HTTP exceptions as-is
             raise
         except Exception as e:
-            logging.error(f"Failed to place {trade_type} order: {e}")
+            logger.error(f"Failed to place {trade_type} order: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to place trade: {str(e)}")
     
     async def get_connector_instance(self, account_name: str, connector_name: str):
@@ -833,10 +840,10 @@ class AccountsService:
         
         try:
             result = connector.cancel(trading_pair=trading_pair, client_order_id=client_order_id)
-            logging.info(f"Cancelled order {client_order_id} on {connector_name} (Account: {account_name})")
+            logger.info(f"Cancelled order {client_order_id} on {connector_name} (Account: {account_name})")
             return result
         except Exception as e:
-            logging.error(f"Failed to cancel order {client_order_id}: {e}")
+            logger.error(f"Failed to cancel order {client_order_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to cancel order: {str(e)}")
     
     async def set_leverage(self, account_name: str, connector_name: str, 
@@ -869,11 +876,11 @@ class AccountsService:
         try:
             await connector._execute_set_leverage(trading_pair, leverage)
             message = f"Leverage for {trading_pair} set to {leverage} on {connector_name}"
-            logging.info(f"Set leverage for {trading_pair} to {leverage} on {connector_name} (Account: {account_name})")
+            logger.info(f"Set leverage for {trading_pair} to {leverage} on {connector_name} (Account: {account_name})")
             return {"status": "success", "message": message}
             
         except Exception as e:
-            logging.error(f"Failed to set leverage for {trading_pair} to {leverage}: {e}")
+            logger.error(f"Failed to set leverage for {trading_pair} to {leverage}: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to set leverage: {str(e)}")
 
     async def set_position_mode(self, account_name: str, connector_name: str, 
@@ -915,11 +922,11 @@ class AccountsService:
                 await result
             
             message = f"Position mode set to {position_mode.value} on {connector_name}"
-            logging.info(f"Set position mode to {position_mode.value} on {connector_name} (Account: {account_name})")
+            logger.info(f"Set position mode to {position_mode.value} on {connector_name} (Account: {account_name})")
             return {"status": "success", "message": message}
             
         except Exception as e:
-            logging.error(f"Failed to set position mode to {position_mode.value}: {e}")
+            logger.error(f"Failed to set position mode to {position_mode.value}: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to set position mode: {str(e)}")
 
     async def get_position_mode(self, account_name: str, connector_name: str) -> Dict[str, str]:
@@ -955,7 +962,7 @@ class AccountsService:
             }
             
         except Exception as e:
-            logging.error(f"Failed to get position mode: {e}")
+            logger.error(f"Failed to get position mode: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to get position mode: {str(e)}")
 
     async def get_orders(self, account_name: Optional[str] = None, market: Optional[str] = None, 
@@ -980,7 +987,7 @@ class AccountsService:
                 )
                 return [order_repo.to_dict(order) for order in orders]
         except Exception as e:
-            logging.error(f"Error getting orders: {e}")
+            logger.error(f"Error getting orders: {e}")
             return []
 
     async def get_active_orders_history(self, account_name: Optional[str] = None, market: Optional[str] = None, 
@@ -998,7 +1005,7 @@ class AccountsService:
                 )
                 return [order_repo.to_dict(order) for order in orders]
         except Exception as e:
-            logging.error(f"Error getting active orders: {e}")
+            logger.error(f"Error getting active orders: {e}")
             return []
 
     async def get_orders_summary(self, account_name: Optional[str] = None, start_time: Optional[int] = None,
@@ -1015,7 +1022,7 @@ class AccountsService:
                     end_time=end_time
                 )
         except Exception as e:
-            logging.error(f"Error getting orders summary: {e}")
+            logger.error(f"Error getting orders summary: {e}")
             return {
                 "total_orders": 0,
                 "filled_orders": 0,
@@ -1047,7 +1054,7 @@ class AccountsService:
                 )
                 return [trade_repo.to_dict(trade, order) for trade, order in trade_order_pairs]
         except Exception as e:
-            logging.error(f"Error getting trades: {e}")
+            logger.error(f"Error getting trades: {e}")
             return []
 
     async def get_account_positions(self, account_name: str, connector_name: str) -> List[Dict]:
@@ -1098,7 +1105,7 @@ class AccountsService:
             return positions
             
         except Exception as e:
-            logging.error(f"Failed to get positions for {connector_name}: {e}")
+            logger.error(f"Failed to get positions for {connector_name}: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to get positions: {str(e)}")
 
     async def get_funding_payments(self, account_name: str, connector_name: str = None, 
@@ -1129,7 +1136,7 @@ class AccountsService:
                 return [funding_repo.to_dict(payment) for payment in funding_payments]
                 
         except Exception as e:
-            logging.error(f"Error getting funding payments: {e}")
+            logger.error(f"Error getting funding payments: {e}")
             return []
 
     async def get_total_funding_fees(self, account_name: str, connector_name: str, 
@@ -1157,7 +1164,7 @@ class AccountsService:
                 )
                 
         except Exception as e:
-            logging.error(f"Error getting total funding fees: {e}")
+            logger.error(f"Error getting total funding fees: {e}")
             return {
                 "total_funding_fees": 0,
                 "payment_count": 0,

@@ -2,6 +2,9 @@ import asyncio
 import logging
 import math
 import time
+
+# Create module-specific logger
+logger = logging.getLogger(__name__)
 from typing import Any, Optional, Union
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -56,28 +59,28 @@ class OrdersRecorder:
         # Subscribe to order events using the same pattern as MarketsRecorder
         for event, forwarder in self._event_pairs:
             connector.add_listener(event, forwarder)
-            logging.info(f"OrdersRecorder: Added listener for {event} with forwarder {forwarder}")
+            logger.info(f"OrdersRecorder: Added listener for {event} with forwarder {forwarder}")
             
             # Debug: Check if listeners were actually added
             if hasattr(connector, '_event_listeners'):
                 listeners = connector._event_listeners.get(event, [])
-                logging.info(f"OrdersRecorder: Event {event} now has {len(listeners)} listeners")
+                logger.info(f"OrdersRecorder: Event {event} now has {len(listeners)} listeners")
                 for i, listener in enumerate(listeners):
-                    logging.info(f"OrdersRecorder: Listener {i}: {listener}")
+                    logger.info(f"OrdersRecorder: Listener {i}: {listener}")
         
-        logging.info(f"OrdersRecorder started for {self.account_name}/{self.connector_name} with {len(self._event_pairs)} event listeners")
+        logger.info(f"OrdersRecorder started for {self.account_name}/{self.connector_name} with {len(self._event_pairs)} event listeners")
         
         # Debug: Print connector info
-        logging.info(f"OrdersRecorder: Connector type: {type(connector)}")
-        logging.info(f"OrdersRecorder: Connector name: {getattr(connector, 'name', 'unknown')}")
-        logging.info(f"OrdersRecorder: Connector ready: {getattr(connector, 'ready', 'unknown')}")
+        logger.info(f"OrdersRecorder: Connector type: {type(connector)}")
+        logger.info(f"OrdersRecorder: Connector name: {getattr(connector, 'name', 'unknown')}")
+        logger.info(f"OrdersRecorder: Connector ready: {getattr(connector, 'ready', 'unknown')}")
         
         # Test if forwarders are callable
         for event, forwarder in self._event_pairs:
             if callable(forwarder):
-                logging.info(f"OrdersRecorder: Forwarder for {event} is callable")
+                logger.info(f"OrdersRecorder: Forwarder for {event} is callable")
             else:
-                logging.error(f"OrdersRecorder: Forwarder for {event} is NOT callable: {type(forwarder)}")
+                logger.error(f"OrdersRecorder: Forwarder for {event} is NOT callable: {type(forwarder)}")
     
     async def stop(self):
         """Stop recording orders"""
@@ -86,7 +89,7 @@ class OrdersRecorder:
             for event, forwarder in self._event_pairs:
                 self._connector.remove_listener(event, forwarder)
             
-        logging.info(f"OrdersRecorder stopped for {self.account_name}/{self.connector_name}")
+        logger.info(f"OrdersRecorder stopped for {self.account_name}/{self.connector_name}")
     
     def _extract_error_message(self, event) -> str:
         """Extract error message from various possible event attributes."""
@@ -102,46 +105,46 @@ class OrdersRecorder:
     
     def _did_create_order(self, event_tag: int, market: ConnectorBase, event: Union[BuyOrderCreatedEvent, SellOrderCreatedEvent]):
         """Handle order creation events - called by SourceInfoEventForwarder"""
-        logging.info(f"OrdersRecorder: _did_create_order called for order {getattr(event, 'order_id', 'unknown')}")
+        logger.info(f"OrdersRecorder: _did_create_order called for order {getattr(event, 'order_id', 'unknown')}")
         try:
             # Determine trade type from event
             trade_type = TradeType.BUY if isinstance(event, BuyOrderCreatedEvent) else TradeType.SELL
-            logging.info(f"OrdersRecorder: Creating task to handle order created - {trade_type} order")
+            logger.info(f"OrdersRecorder: Creating task to handle order created - {trade_type} order")
             asyncio.create_task(self._handle_order_created(event, trade_type))
         except Exception as e:
-            logging.error(f"Error in _did_create_order: {e}")
+            logger.error(f"Error in _did_create_order: {e}")
     
     def _did_fill_order(self, event_tag: int, market: ConnectorBase, event: OrderFilledEvent):
         """Handle order fill events - called by SourceInfoEventForwarder"""
         try:
             asyncio.create_task(self._handle_order_filled(event))
         except Exception as e:
-            logging.error(f"Error in _did_fill_order: {e}")
+            logger.error(f"Error in _did_fill_order: {e}")
     
     def _did_cancel_order(self, event_tag: int, market: ConnectorBase, event: Any):
         """Handle order cancel events - called by SourceInfoEventForwarder"""
         try:
             asyncio.create_task(self._handle_order_cancelled(event))
         except Exception as e:
-            logging.error(f"Error in _did_cancel_order: {e}")
+            logger.error(f"Error in _did_cancel_order: {e}")
     
     def _did_fail_order(self, event_tag: int, market: ConnectorBase, event: Any):
         """Handle order failure events - called by SourceInfoEventForwarder"""
         try:
             asyncio.create_task(self._handle_order_failed(event))
         except Exception as e:
-            logging.error(f"Error in _did_fail_order: {e}")
+            logger.error(f"Error in _did_fail_order: {e}")
     
     def _did_complete_order(self, event_tag: int, market: ConnectorBase, event: Any):
         """Handle order completion events - called by SourceInfoEventForwarder"""
         try:
             asyncio.create_task(self._handle_order_completed(event))
         except Exception as e:
-            logging.error(f"Error in _did_complete_order: {e}")
+            logger.error(f"Error in _did_complete_order: {e}")
     
     async def _handle_order_created(self, event: Union[BuyOrderCreatedEvent, SellOrderCreatedEvent], trade_type: TradeType):
         """Handle order creation events"""
-        logging.info(f"OrdersRecorder: _handle_order_created started for order {event.order_id}")
+        logger.info(f"OrdersRecorder: _handle_order_created started for order {event.order_id}")
         try:
             async with self.db_manager.get_session_context() as session:
                 order_repo = OrderRepository(session)
@@ -159,9 +162,9 @@ class OrdersRecorder:
                 }
                 await order_repo.create_order(order_data)
                 
-            logging.info(f"OrdersRecorder: Successfully recorded order created: {event.order_id}")
+            logger.info(f"OrdersRecorder: Successfully recorded order created: {event.order_id}")
         except Exception as e:
-            logging.error(f"OrdersRecorder: Error recording order created: {e}")
+            logger.error(f"OrdersRecorder: Error recording order created: {e}")
     
     async def _handle_order_filled(self, event: OrderFilledEvent):
         """Handle order fill events"""
@@ -187,7 +190,7 @@ class OrdersRecorder:
                         trade_fee_paid = float(fee_in_quote)
                         trade_fee_currency = quote_asset
                     except Exception as e:
-                        logging.error(f"Error calculating trade fee: {e}")
+                        logger.error(f"Error calculating trade fee: {e}")
                         trade_fee_paid = 0
                         trade_fee_currency = None
                 
@@ -205,7 +208,7 @@ class OrdersRecorder:
                         fee_currency=trade_fee_currency
                     )
                 except (ValueError, InvalidOperation) as e:
-                    logging.error(f"Error processing order fill for {event.order_id}: {e}, skipping update")
+                    logger.error(f"Error processing order fill for {event.order_id}: {e}, skipping update")
                     return
                 
                 # Create trade record using validated values
@@ -228,12 +231,12 @@ class OrdersRecorder:
                         }
                         await trade_repo.create_trade(trade_data)
                     except (ValueError, TypeError) as e:
-                        logging.error(f"Error creating trade record for {event.order_id}: {e}")
-                        logging.error(f"Trade data that failed: timestamp={event.timestamp}, amount={event.amount}, price={event.price}, fee={trade_fee_paid}")
+                        logger.error(f"Error creating trade record for {event.order_id}: {e}")
+                        logger.error(f"Trade data that failed: timestamp={event.timestamp}, amount={event.amount}, price={event.price}, fee={trade_fee_paid}")
                 
-            logging.debug(f"Recorded order fill: {event.order_id} - {event.amount} @ {event.price}")
+            logger.debug(f"Recorded order fill: {event.order_id} - {event.amount} @ {event.price}")
         except Exception as e:
-            logging.error(f"Error recording order fill: {e}")
+            logger.error(f"Error recording order fill: {e}")
     
     async def _handle_order_cancelled(self, event: Any):
         """Handle order cancellation events"""
@@ -245,9 +248,9 @@ class OrdersRecorder:
                     status="CANCELLED"
                 )
                     
-            logging.debug(f"Recorded order cancelled: {event.order_id}")
+            logger.debug(f"Recorded order cancelled: {event.order_id}")
         except Exception as e:
-            logging.error(f"Error recording order cancellation: {e}")
+            logger.error(f"Error recording order cancellation: {e}")
     
     def _get_order_details_from_connector(self, order_id: str) -> Optional[dict]:
         """Try to get order details from connector's tracked orders"""
@@ -263,7 +266,7 @@ class OrdersRecorder:
                         "price": float(in_flight_order.price) if in_flight_order.price else None
                     }
         except Exception as e:
-            logging.error(f"Error getting order details from connector: {e}")
+            logger.error(f"Error getting order details from connector: {e}")
         return None
     
     async def _handle_order_failed(self, event: Any):
@@ -284,12 +287,12 @@ class OrdersRecorder:
                         status="FAILED",
                         error_message=error_msg
                     )
-                    logging.info(f"Updated existing order {event.order_id} to FAILED status")
+                    logger.info(f"Updated existing order {event.order_id} to FAILED status")
                 else:
                     # Try to get order details from connector's tracked orders
                     order_details = self._get_order_details_from_connector(event.order_id)
                     if order_details:
-                        logging.info(f"Retrieved order details from connector for {event.order_id}: {order_details}")
+                        logger.info(f"Retrieved order details from connector for {event.order_id}: {order_details}")
                     
                     # Create order record as FAILED with available details
                     if order_details:
@@ -321,10 +324,10 @@ class OrdersRecorder:
                         }
                     
                     await order_repo.create_order(order_data)
-                    logging.info(f"Created failed order record for {event.order_id}")
+                    logger.info(f"Created failed order record for {event.order_id}")
                     
         except Exception as e:
-            logging.error(f"Error recording order failure: {e}")
+            logger.error(f"Error recording order failure: {e}")
     
     async def _handle_order_completed(self, event: Any):
         """Handle order completion events"""
@@ -336,6 +339,6 @@ class OrdersRecorder:
                     order.status = "FILLED"
                     order.exchange_order_id = getattr(event, 'exchange_order_id', None)
                     
-            logging.debug(f"Recorded order completed: {event.order_id}")
+            logger.debug(f"Recorded order completed: {event.order_id}")
         except Exception as e:
-            logging.error(f"Error recording order completion: {e}")
+            logger.error(f"Error recording order completion: {e}")

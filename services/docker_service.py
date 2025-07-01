@@ -5,6 +5,9 @@ import time
 import threading
 from typing import Dict
 
+# Create module-specific logger
+logger = logging.getLogger(__name__)
+
 import docker
 from docker.errors import DockerException
 from docker.types import LogConfig
@@ -31,7 +34,7 @@ class DockerService:
             # Start background cleanup thread
             self._start_cleanup_thread()
         except DockerException as e:
-            logging.error(f"It was not possible to connect to Docker. Please make sure Docker is running. Error: {e}")
+            logger.error(f"It was not possible to connect to Docker. Please make sure Docker is running. Error: {e}")
 
     def get_active_containers(self, name_filter: str = None):
         try:
@@ -183,14 +186,14 @@ class DockerService:
                             
                             if os.path.exists(source_controller_file):
                                 shutil.copy2(source_controller_file, destination_controller_file)
-                                logging.info(f"Copied controller config: {controller_file}")
+                                logger.info(f"Copied controller config: {controller_file}")
                             else:
-                                logging.warning(f"Controller config file {controller_file} not found in {controllers_config_dir}")
+                                logger.warning(f"Controller config file {controller_file} not found in {controllers_config_dir}")
                                 
                 except Exception as e:
-                    logging.error(f"Error reading script config file {config.script_config}: {e}")
+                    logger.error(f"Error reading script config file {config.script_config}: {e}")
             else:
-                logging.warning(f"Script config file {config.script_config} not found in {script_config_dir}")
+                logger.warning(f"Script config file {config.script_config} not found in {script_config_dir}")
         # Path relative to fs_util base_path (which is "bots")
         conf_file_path = f"instances/{instance_name}/conf/conf_client.yml"
         client_config = fs_util.read_yaml_file(conf_file_path)
@@ -250,7 +253,7 @@ class DockerService:
         if self._cleanup_thread is None or not self._cleanup_thread.is_alive():
             self._cleanup_thread = threading.Thread(target=self._periodic_cleanup, daemon=True)
             self._cleanup_thread.start()
-            logging.info("Started Docker pull status cleanup thread")
+            logger.info("Started Docker pull status cleanup thread")
 
     def _periodic_cleanup(self):
         """Periodically clean up old pull status entries"""
@@ -258,7 +261,7 @@ class DockerService:
             try:
                 self._cleanup_old_pull_status()
             except Exception as e:
-                logging.error(f"Error in cleanup thread: {e}")
+                logger.error(f"Error in cleanup thread: {e}")
             
             # Wait for the next cleanup interval
             self._stop_cleanup.wait(self.CLEANUP_INTERVAL_SECONDS)
@@ -282,7 +285,7 @@ class DockerService:
         # Remove old entries
         for image_name in to_remove:
             del self._pull_status[image_name]
-            logging.info(f"Cleaned up old pull status for {image_name}")
+            logger.info(f"Cleaned up old pull status for {image_name}")
         
         # If still over limit, remove oldest completed/failed entries
         if len(self._pull_status) > self.PULL_STATUS_MAX_ENTRIES:
@@ -299,7 +302,7 @@ class DockerService:
             excess_count = len(self._pull_status) - self.PULL_STATUS_MAX_ENTRIES
             for i in range(min(excess_count, len(completed_entries))):
                 del self._pull_status[completed_entries[i][0]]
-                logging.info(f"Cleaned up excess pull status for {completed_entries[i][0]}")
+                logger.info(f"Cleaned up excess pull status for {completed_entries[i][0]}")
 
     def pull_image_async(self, image_name: str):
         """Start pulling a Docker image asynchronously with status tracking"""

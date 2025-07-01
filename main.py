@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated
 
 import logfire
+import logging
 from dotenv import load_dotenv
 # Load environment variables early
 load_dotenv()
@@ -33,8 +34,6 @@ from routers import (
     trading
 )
 
-# Configure logging
-import logging
 from config import settings
 
 
