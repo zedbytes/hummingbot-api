@@ -4,6 +4,9 @@ from typing import Annotated
 
 import logfire
 from dotenv import load_dotenv
+# Load environment variables early
+load_dotenv()
+
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,10 +35,6 @@ from routers import (
 
 # Configure logging
 import logging
-
-# Load environment variables early
-load_dotenv()
-
 from config import settings
 
 
