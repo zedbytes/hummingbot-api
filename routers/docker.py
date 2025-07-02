@@ -21,11 +21,11 @@ async def is_docker_running(docker_service: DockerService = Depends(get_docker_s
     Returns:
         Dictionary indicating if Docker is running
     """
-    return {"is_docker_running": docker_service.is_docker_running()}
+    return  docker_service.is_docker_running()
 
 
-@router.get("/available-images/{image_name}")
-async def available_images(image_name: str, docker_service: DockerService = Depends(get_docker_service)):
+@router.get("/available-images/")
+async def available_images(image_name: str = None, docker_service: DockerService = Depends(get_docker_service)):
     """
     Get available Docker images matching the specified name.
     
@@ -37,8 +37,9 @@ async def available_images(image_name: str, docker_service: DockerService = Depe
         Dictionary with list of available image tags
     """
     available_images = docker_service.get_available_images()
-    image_tags = [tag for image in available_images["images"] for tag in image.tags if image_name in tag]
-    return {"available_images": image_tags}
+    if image_name:
+        return [tag for image in available_images["images"] for tag in image.tags if image_name in tag]
+    return [tag for tag in available_images["images"]]
 
 
 @router.get("/active-containers")
