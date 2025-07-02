@@ -1,9 +1,8 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from utils.file_system import fs_util
-from utils.hummingbot_database_reader import HummingbotDatabase, PerformanceDataSource
-from hummingbot.strategy_v2.backtesting.backtesting_engine_base import BacktestingEngineBase
+from utils.hummingbot_database_reader import HummingbotDatabase
 
 router = APIRouter(tags=["Archived Bots"], prefix="/archived-bots")
 
@@ -60,6 +59,7 @@ async def get_database_summary(db_path: str):
         trades = db.get_trade_fills()
         executors = db.get_executors_data()
         positions = db.get_positions()
+        controllers = db.get_controllers_data()
         
         return {
             "db_path": db_path,
@@ -67,6 +67,7 @@ async def get_database_summary(db_path: str):
             "total_trades": len(trades),
             "total_executors": len(executors),
             "total_positions": len(positions),
+            "total_controllers": len(controllers),
             "trading_pairs": orders["symbol"].unique().tolist() if len(orders) > 0 else [],
             "exchanges": orders["market"].unique().tolist() if len(orders) > 0 else [],
         }
@@ -269,3 +270,27 @@ async def get_database_positions(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching positions: {str(e)}")
+
+
+@router.get("/{db_path:path}/controllers")
+async def get_database_controllers(db_path: str):
+    """
+    Get controller data from a database.
+    
+    Args:
+        db_path: Full path to the database file
+        
+    Returns:
+        List of controllers that were running with their configurations
+    """
+    try:
+        db = HummingbotDatabase(db_path)
+        controllers = db.get_controllers_data()
+        
+        return {
+            "db_path": db_path,
+            "controllers": controllers.fillna(0).to_dict('records'),
+            "total": len(controllers)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching controllers: {str(e)}")
