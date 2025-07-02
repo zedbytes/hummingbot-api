@@ -34,14 +34,17 @@ class HummingbotDatabase:
         order_status_status = self._get_table_status(self.get_order_status)
         executors_status = self._get_table_status(self.get_executors_data)
         controller_status = self._get_table_status(self.get_controllers_data)
+        positions_status = self._get_table_status(self.get_positions)
         general_status = all(status == "Correct" for status in
-                             [trade_fill_status, orders_status, order_status_status, executors_status, controller_status])
+                             [trade_fill_status, orders_status, order_status_status, executors_status, controller_status, positions_status])
         status = {"db_name": self.db_name,
                   "db_path": self.db_path,
                   "trade_fill": trade_fill_status,
                   "orders": orders_status,
                   "order_status": order_status_status,
                   "executors": executors_status,
+                  "controllers": controller_status,
+                  "positions": positions_status,
                   "general_status": general_status
                   }
         return status
@@ -86,6 +89,15 @@ class HummingbotDatabase:
             query = "SELECT * FROM Controllers"
             controllers = pd.read_sql_query(text(query), session.connection())
         return controllers
+
+    def get_positions(self) -> pd.DataFrame:
+        with self.session_maker() as session:
+            query = "SELECT * FROM Position"
+            positions = pd.read_sql_query(text(query), session.connection())
+            # Convert decimal fields from stored format (divide by 1e6)
+            decimal_cols = ["volume_traded_quote", "amount", "breakeven_price", "unrealized_pnl_quote", "cum_fees_quote"]
+            positions[decimal_cols] = positions[decimal_cols] / 1e6
+        return positions
 
     def calculate_trade_based_performance(self) -> pd.DataFrame:
         """

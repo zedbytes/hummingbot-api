@@ -59,12 +59,14 @@ async def get_database_summary(db_path: str):
         orders = db.get_orders()
         trades = db.get_trade_fills()
         executors = db.get_executors_data()
+        positions = db.get_positions()
         
         return {
             "db_path": db_path,
             "total_orders": len(orders),
             "total_trades": len(trades),
             "total_executors": len(executors),
+            "total_positions": len(positions),
             "trading_pairs": orders["symbol"].unique().tolist() if len(orders) > 0 else [],
             "exchanges": orders["market"].unique().tolist() if len(orders) > 0 else [],
         }
@@ -228,3 +230,42 @@ async def get_database_executors(db_path: str):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching executors: {str(e)}")
+
+
+@router.get("/{db_path:path}/positions")
+async def get_database_positions(
+    db_path: str,
+    limit: int = Query(default=100, description="Limit number of positions returned"),
+    offset: int = Query(default=0, description="Offset for pagination")
+):
+    """
+    Get position data from a database.
+    
+    Args:
+        db_path: Full path to the database file
+        limit: Maximum number of positions to return
+        offset: Offset for pagination
+        
+    Returns:
+        List of positions with pagination info
+    """
+    try:
+        db = HummingbotDatabase(db_path)
+        positions = db.get_positions()
+        
+        # Apply pagination
+        total_positions = len(positions)
+        positions_page = positions.iloc[offset:offset + limit]
+        
+        return {
+            "db_path": db_path,
+            "positions": positions_page.fillna(0).to_dict('records'),
+            "pagination": {
+                "total": total_positions,
+                "limit": limit,
+                "offset": offset,
+                "has_more": offset + limit < total_positions
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching positions: {str(e)}")
