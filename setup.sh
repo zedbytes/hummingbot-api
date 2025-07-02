@@ -137,10 +137,10 @@ if [ ! -f "bots/credentials/master_account/.password_verification" ]; then
     echo ""
 fi
 
-echo -e "${YELLOW}Next steps:${NC}"
-echo "1. Review the .env file if needed: ${BLUE}cat .env${NC}"
-echo "2. Install dependencies: ${BLUE}make install${NC}"
-echo "3. Start the API: ${BLUE}make run${NC}"
+echo -e "Next steps:"
+echo "1. Review the .env file if needed: cat .env"
+echo "2. Install dependencies: make install"
+echo "3. Start the API: make run"
 echo ""
 echo -e "${PURPLE}💡 Pro tip:${NC} You can modify environment variables in .env file anytime"
 echo -e "${PURPLE}📚 Documentation:${NC} Check config.py for all available settings"
