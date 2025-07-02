@@ -263,6 +263,7 @@ class AccountsService:
         except Exception as e:
             logger.error(f"Error adding connector credentials for account {account_name}: {e}")
             await self.delete_credentials(account_name, connector_name)
+            raise e
 
     @staticmethod
     def list_accounts():
