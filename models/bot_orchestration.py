@@ -108,6 +108,6 @@ class V2ControllerDeployment(BaseModel):
     instance_name: str = Field(description="Unique name for the bot instance")
     credentials_profile: str = Field(description="Name of the credentials profile to use")
     controllers_config: List[str] = Field(description="List of controller configuration files to use (without .yml extension)")
-    max_global_drawdown: Optional[float] = Field(default=None, description="Maximum allowed global drawdown percentage (0.0-1.0)")
-    max_controller_drawdown: Optional[float] = Field(default=None, description="Maximum allowed per-controller drawdown percentage (0.0-1.0)")
+    max_global_drawdown_quote: Optional[float] = Field(default=None, description="Maximum allowed global drawdown in quote usually USDT")
+    max_controller_drawdown_quote: Optional[float] = Field(default=None, description="Maximum allowed per-controller drawdown in quote usually USDT")
     image: str = Field(default="hummingbot/hummingbot:latest", description="Docker image for the Hummingbot instance")

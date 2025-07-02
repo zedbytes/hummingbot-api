@@ -383,10 +383,10 @@ async def deploy_v2_controllers(
         }
         
         # Add optional drawdown parameters if provided
-        if deployment.max_global_drawdown is not None:
-            script_config_content["max_global_drawdown"] = deployment.max_global_drawdown
-        if deployment.max_controller_drawdown is not None:
-            script_config_content["max_controller_drawdown"] = deployment.max_controller_drawdown
+        if deployment.max_global_drawdown_quote is not None:
+            script_config_content["max_global_drawdown_quote"] = deployment.max_global_drawdown_quote
+        if deployment.max_controller_drawdown_quote is not None:
+            script_config_content["max_controller_drawdown_quote"] = deployment.max_controller_drawdown_quote
         
         # Save the script config to the scripts directory
         scripts_dir = os.path.join("conf", "scripts")
