@@ -183,3 +183,27 @@ class TradeFilterRequest(TimeRangePaginationParams):
     connector_names: Optional[List[str]] = Field(default=None, description="List of connector names to filter by")
     trading_pairs: Optional[List[str]] = Field(default=None, description="List of trading pairs to filter by")
     trade_types: Optional[List[str]] = Field(default=None, description="List of trade types to filter by (BUY/SELL)")
+
+
+class PortfolioStateFilterRequest(BaseModel):
+    """Request model for filtering portfolio state"""
+    account_names: Optional[List[str]] = Field(default=None, description="List of account names to filter by")
+    connector_names: Optional[List[str]] = Field(default=None, description="List of connector names to filter by")
+
+
+class PortfolioHistoryFilterRequest(TimeRangePaginationParams):
+    """Request model for filtering portfolio history"""
+    account_names: Optional[List[str]] = Field(default=None, description="List of account names to filter by")
+    connector_names: Optional[List[str]] = Field(default=None, description="List of connector names to filter by")
+
+
+class PortfolioDistributionFilterRequest(BaseModel):
+    """Request model for filtering portfolio distribution"""
+    account_names: Optional[List[str]] = Field(default=None, description="List of account names to filter by")
+    connector_names: Optional[List[str]] = Field(default=None, description="List of connector names to filter by")
+
+
+class AccountsDistributionFilterRequest(BaseModel):
+    """Request model for filtering accounts distribution"""
+    account_names: Optional[List[str]] = Field(default=None, description="List of account names to filter by")
+    connector_names: Optional[List[str]] = Field(default=None, description="List of connector names to filter by")

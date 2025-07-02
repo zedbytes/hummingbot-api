@@ -70,15 +70,8 @@ async def place_trade(trade_request: TradeRequest,
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unexpected error placing trade: {str(e)}")
 
-
-class CancelOrderRequest(BaseModel):
-    """Request model for cancelling an order"""
-    trading_pair: str
-
-
 @router.post("/{account_name}/{connector_name}/orders/{client_order_id}/cancel")
 async def cancel_order(account_name: str, connector_name: str, client_order_id: str,
-                       request: CancelOrderRequest,
                        accounts_service: AccountsService = Depends(get_accounts_service)):
     """
     Cancel a specific order by its client order ID.
@@ -100,7 +93,6 @@ async def cancel_order(account_name: str, connector_name: str, client_order_id: 
         cancelled_order_id = await accounts_service.cancel_order(
             account_name=account_name,
             connector_name=connector_name,
-            trading_pair=request.trading_pair,
             client_order_id=client_order_id
         )
         return {"message": f"Order {cancelled_order_id} cancelled successfully"}

@@ -1,8 +1,14 @@
 from typing import Dict, List, Optional
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends
 
+from models.trading import (
+    PortfolioStateFilterRequest,
+    PortfolioHistoryFilterRequest,
+    PortfolioDistributionFilterRequest,
+    AccountsDistributionFilterRequest
+)
 from services.accounts_service import AccountsService
 from deps import get_accounts_service
 from models import PaginatedResponse
@@ -10,76 +16,77 @@ from models import PaginatedResponse
 router = APIRouter(tags=["Portfolio"], prefix="/portfolio")
 
 
-@router.get("/state", response_model=Dict[str, Dict[str, List[Dict]]])
+@router.post("/state", response_model=Dict[str, Dict[str, List[Dict]]])
 async def get_portfolio_state(
-    account_names: Optional[List[str]] = Query(default=None, description="Filter by account names"),
+    filter_request: PortfolioStateFilterRequest,
     accounts_service: AccountsService = Depends(get_accounts_service)
 ):
     """
     Get the current state of all or filtered accounts portfolio.
     
     Args:
-        account_names: Optional list of account names to filter by
+        filter_request: JSON payload with filtering criteria
         
     Returns:
         Dict containing account states with connector balances and token information
     """
     all_states = accounts_service.get_accounts_state()
     
-    # If no filter, return all accounts
-    if not account_names:
-        return all_states
+    # Apply account name filter first
+    if filter_request.account_names:
+        filtered_states = {}
+        for account_name in filter_request.account_names:
+            if account_name in all_states:
+                filtered_states[account_name] = all_states[account_name]
+        all_states = filtered_states
     
-    # Filter by requested accounts
-    filtered_states = {}
-    for account_name in account_names:
-        if account_name in all_states:
-            filtered_states[account_name] = all_states[account_name]
+    # Apply connector filter if specified
+    if filter_request.connector_names:
+        for account_name, account_data in all_states.items():
+            # Filter connectors directly (they are at the top level of account_data)
+            filtered_connectors = {}
+            for connector_name in filter_request.connector_names:
+                if connector_name in account_data:
+                    filtered_connectors[connector_name] = account_data[connector_name]
+            # Replace account_data with only filtered connectors
+            all_states[account_name] = filtered_connectors
     
-    return filtered_states
+    return all_states
 
 
-@router.get("/history", response_model=PaginatedResponse)
+@router.post("/history", response_model=PaginatedResponse)
 async def get_portfolio_history(
-    account_names: Optional[List[str]] = Query(default=None, description="Filter by account names"),
-    limit: int = Query(default=100, ge=1, le=1000, description="Number of items per page"),
-    cursor: str = Query(default=None, description="Cursor for next page (ISO timestamp)"),
-    start_time: datetime = Query(default=None, description="Start time for filtering"),
-    end_time: datetime = Query(default=None, description="End time for filtering"),
+    filter_request: PortfolioHistoryFilterRequest,
     accounts_service: AccountsService = Depends(get_accounts_service)
 ):
     """
     Get the historical state of all or filtered accounts portfolio with pagination.
     
     Args:
-        account_names: Optional list of account names to filter by
-        limit: Number of items per page (1-1000)
-        cursor: Cursor for pagination (ISO timestamp)
-        start_time: Start time for filtering results
-        end_time: End time for filtering results
+        filter_request: JSON payload with filtering criteria
         
     Returns:
         Paginated response with historical portfolio data
     """
     try:
-        if not account_names:
+        if not filter_request.account_names:
             # Get history for all accounts
             data, next_cursor, has_more = await accounts_service.load_account_state_history(
-                limit=limit,
-                cursor=cursor,
-                start_time=start_time,
-                end_time=end_time
+                limit=filter_request.limit,
+                cursor=filter_request.cursor,
+                start_time=filter_request.start_time,
+                end_time=filter_request.end_time
             )
         else:
             # Get history for specific accounts - need to aggregate
             all_data = []
-            for account_name in account_names:
+            for account_name in filter_request.account_names:
                 acc_data, _, _ = await accounts_service.get_account_state_history(
                     account_name=account_name,
-                    limit=limit,
-                    cursor=cursor,
-                    start_time=start_time,
-                    end_time=end_time
+                    limit=filter_request.limit,
+                    cursor=filter_request.cursor,
+                    start_time=filter_request.start_time,
+                    end_time=filter_request.end_time
                 )
                 all_data.extend(acc_data)
             
@@ -87,21 +94,33 @@ async def get_portfolio_history(
             all_data.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
             
             # Apply limit
-            data = all_data[:limit]
-            has_more = len(all_data) > limit
+            data = all_data[:filter_request.limit]
+            has_more = len(all_data) > filter_request.limit
             next_cursor = data[-1]["timestamp"] if data and has_more else None
+        
+        # Apply connector filter to the data if specified
+        if filter_request.connector_names:
+            for item in data:
+                for account_name, account_data in item.items():
+                    if isinstance(account_data, dict) and "connectors" in account_data:
+                        filtered_connectors = {}
+                        for connector_name in filter_request.connector_names:
+                            if connector_name in account_data["connectors"]:
+                                filtered_connectors[connector_name] = account_data["connectors"][connector_name]
+                        account_data["connectors"] = filtered_connectors
         
         return PaginatedResponse(
             data=data,
             pagination={
-                "limit": limit,
+                "limit": filter_request.limit,
                 "has_more": has_more,
                 "next_cursor": next_cursor,
-                "current_cursor": cursor,
+                "current_cursor": filter_request.cursor,
                 "filters": {
-                    "account_names": account_names,
-                    "start_time": start_time.isoformat() if start_time else None,
-                    "end_time": end_time.isoformat() if end_time else None
+                    "account_names": filter_request.account_names,
+                    "connector_names": filter_request.connector_names,
+                    "start_time": filter_request.start_time.isoformat() if filter_request.start_time else None,
+                    "end_time": filter_request.end_time.isoformat() if filter_request.end_time else None
                 }
             }
         )
@@ -109,26 +128,26 @@ async def get_portfolio_history(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/distribution")
+@router.post("/distribution")
 async def get_portfolio_distribution(
-    account_names: Optional[List[str]] = Query(default=None, description="Filter by account names"),
+    filter_request: PortfolioDistributionFilterRequest,
     accounts_service: AccountsService = Depends(get_accounts_service)
 ):
     """
     Get portfolio distribution by tokens with percentages across all or filtered accounts.
     
     Args:
-        account_names: Optional list of account names to filter by
+        filter_request: JSON payload with filtering criteria
         
     Returns:
         Dictionary with token distribution including percentages, values, and breakdown by accounts/connectors
     """
-    if not account_names:
+    if not filter_request.account_names:
         # Get distribution for all accounts
         return accounts_service.get_portfolio_distribution()
-    elif len(account_names) == 1:
+    elif len(filter_request.account_names) == 1:
         # Single account - use existing method
-        return accounts_service.get_portfolio_distribution(account_names[0])
+        return accounts_service.get_portfolio_distribution(filter_request.account_names[0])
     else:
         # Multiple accounts - need to aggregate
         aggregated_distribution = {
@@ -138,7 +157,7 @@ async def get_portfolio_distribution(
             "accounts": {}
         }
         
-        for account_name in account_names:
+        for account_name in filter_request.account_names:
             account_dist = accounts_service.get_portfolio_distribution(account_name)
             
             # Skip if account doesn't exist or has error
@@ -175,16 +194,16 @@ async def get_portfolio_distribution(
         return aggregated_distribution
 
 
-@router.get("/accounts-distribution")
+@router.post("/accounts-distribution")
 async def get_accounts_distribution(
-    account_names: Optional[List[str]] = Query(default=None, description="Filter by account names"),
+    filter_request: AccountsDistributionFilterRequest,
     accounts_service: AccountsService = Depends(get_accounts_service)
 ):
     """
     Get portfolio distribution by accounts with percentages.
     
     Args:
-        account_names: Optional list of account names to filter by
+        filter_request: JSON payload with filtering criteria
         
     Returns:
         Dictionary with account distribution including percentages, values, and breakdown by connectors
@@ -192,7 +211,7 @@ async def get_accounts_distribution(
     all_distribution = accounts_service.get_account_distribution()
     
     # If no filter, return all accounts
-    if not account_names:
+    if not filter_request.account_names:
         return all_distribution
     
     # Filter the distribution by requested accounts
@@ -202,11 +221,34 @@ async def get_accounts_distribution(
         "account_count": 0
     }
     
-    for account_name in account_names:
+    for account_name in filter_request.account_names:
         if account_name in all_distribution.get("accounts", {}):
             filtered_distribution["accounts"][account_name] = all_distribution["accounts"][account_name]
             filtered_distribution["total_value"] += all_distribution["accounts"][account_name].get("total_value", 0)
     
+    # Apply connector filter if specified
+    if filter_request.connector_names:
+        for account_name, account_data in filtered_distribution["accounts"].items():
+            if "connectors" in account_data:
+                filtered_connectors = {}
+                for connector_name in filter_request.connector_names:
+                    if connector_name in account_data["connectors"]:
+                        filtered_connectors[connector_name] = account_data["connectors"][connector_name]
+                account_data["connectors"] = filtered_connectors
+                
+                # Recalculate account total after connector filtering
+                new_total = sum(
+                    conn_data.get("total_balance_in_usd", 0) 
+                    for conn_data in filtered_connectors.values()
+                )
+                account_data["total_value"] = new_total
+        
+        # Recalculate total_value after connector filtering
+        filtered_distribution["total_value"] = sum(
+            acc_data.get("total_value", 0) 
+            for acc_data in filtered_distribution["accounts"].values()
+        )
+
     # Recalculate percentages
     total_value = filtered_distribution["total_value"]
     if total_value > 0:

@@ -823,15 +823,13 @@ class AccountsService:
         connector = await self.get_connector_instance(account_name, connector_name)
         return {order_id: order.to_json() for order_id, order in connector.in_flight_orders.items()}
     
-    async def cancel_order(self, account_name: str, connector_name: str, 
-                          trading_pair: str, client_order_id: str) -> str:
+    async def cancel_order(self, account_name: str, connector_name: str, client_order_id: str) -> str:
         """
         Cancel an active order.
         
         Args:
             account_name: Name of the account
             connector_name: Name of the connector
-            trading_pair: Trading pair
             client_order_id: Client order ID to cancel
             
         Returns:
@@ -840,7 +838,7 @@ class AccountsService:
         connector = await self.get_connector_instance(account_name, connector_name)
         
         try:
-            result = connector.cancel(trading_pair=trading_pair, client_order_id=client_order_id)
+            result = connector.cancel(trading_pair="NA", client_order_id=client_order_id)
             logger.info(f"Cancelled order {client_order_id} on {connector_name} (Account: {account_name})")
             return result
         except Exception as e:
