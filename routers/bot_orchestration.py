@@ -390,8 +390,7 @@ async def deploy_v2_controllers(
         
         # Save the script config to the scripts directory
         scripts_dir = os.path.join("conf", "scripts")
-        os.makedirs(scripts_dir, exist_ok=True)
-        
+
         script_config_path = os.path.join(scripts_dir, script_config_filename)
         fs_util.dump_dict_to_yaml(script_config_path, script_config_content)
         
