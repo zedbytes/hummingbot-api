@@ -52,7 +52,7 @@ class MQTTManager:
             ("hbot/+/hb", 1),  # Heartbeats
             ("hbot/+/performance", 1),  # Performance metrics
             ("hbot/+/external/event/+", 1),  # External events
-            ("backend-api/response/+", 1),  # RPC responses to our reply_to topics
+            ("hummingbot-api/response/+", 1),  # RPC responses to our reply_to topics
         ]
 
         if username:
@@ -63,7 +63,7 @@ class MQTTManager:
     @asynccontextmanager
     async def _get_client(self):
         """Get MQTT client for a single connection attempt."""
-        client_id = f"backend-api-{int(time.time())}"
+        client_id = f"hummingbot-api-{int(time.time())}"
 
         # Create client with credentials if provided
         if self.username and self.password:
@@ -110,8 +110,8 @@ class MQTTManager:
         try:
             topic = str(message.topic)
 
-            # Check if this is an RPC response to our backend-api
-            if topic.startswith("backend-api/response/"):
+            # Check if this is an RPC response to our hummingbot-api
+            if topic.startswith("hummingbot-api/response/"):
                 await self._handle_rpc_response(topic, message)
                 return
 
@@ -230,7 +230,7 @@ class MQTTManager:
         event_type = channel.split("/")[-1]
 
     async def _handle_rpc_response(self, topic: str, message):
-        """Handle RPC responses on backend-api/response/* topics."""
+        """Handle RPC responses on hummingbot-api/response/* topics."""
         try:
             # Parse the response data
             try:
@@ -310,7 +310,7 @@ class MQTTManager:
 
         # Generate unique reply_to topic
         timestamp = int(time.time() * 1000)
-        reply_to_topic = f"backend-api/response/{timestamp}"
+        reply_to_topic = f"hummingbot-api/response/{timestamp}"
 
         # Create a future to track the response using the reply_to topic as key
         future = asyncio.Future()
@@ -366,8 +366,8 @@ class MQTTManager:
                 "timestamp": int(time.time() * 1000),  # Milliseconds
                 "reply_to": reply_to,  # Custom reply_to topic
                 "msg_id": int(time.time() * 1000),
-                "node_id": "backend-api",
-                "agent": "backend-api",
+                "node_id": "hummingbot-api",
+                "agent": "hummingbot-api",
                 "properties": {},
             },
             "data": data or {},
@@ -405,10 +405,10 @@ class MQTTManager:
         message = {
             "header": {
                 "timestamp": int(time.time() * 1000),  # Milliseconds
-                "reply_to": f"backend-api-response-{int(time.time() * 1000)}",  # Unique response topic
+                "reply_to": f"hummingbot-api-response-{int(time.time() * 1000)}",  # Unique response topic
                 "msg_id": int(time.time() * 1000),
-                "node_id": "backend-api",
-                "agent": "backend-api",
+                "node_id": "hummingbot-api",
+                "agent": "hummingbot-api",
                 "properties": {},
             },
             "data": data or {},
