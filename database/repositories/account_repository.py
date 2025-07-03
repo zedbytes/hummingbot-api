@@ -154,8 +154,8 @@ class AccountRepository:
         if has_more and account_states:
             next_cursor = account_states[-1].timestamp.isoformat()
         
-        # Format response
-        history = []
+        # Format response - Group by minute to aggregate account/connector states
+        minute_groups = {}
         for account_state in account_states:
             token_info = []
             for token_state in account_state.token_states:
@@ -167,15 +167,26 @@ class AccountRepository:
                     "available_units": float(token_state.available_units)
                 })
             
-            state_dict = {
-                "timestamp": account_state.timestamp.isoformat(),
-                "state": {
-                    account_state.account_name: {
-                        account_state.connector_name: token_info
-                    }
+            # Round timestamp to the nearest minute for grouping
+            minute_timestamp = account_state.timestamp.replace(second=0, microsecond=0)
+            minute_key = minute_timestamp.isoformat()
+            
+            # Initialize minute group if it doesn't exist
+            if minute_key not in minute_groups:
+                minute_groups[minute_key] = {
+                    "timestamp": minute_key,
+                    "state": {}
                 }
-            }
-            history.append(state_dict)
+            
+            # Add account/connector to the minute group
+            if account_state.account_name not in minute_groups[minute_key]["state"]:
+                minute_groups[minute_key]["state"][account_state.account_name] = {}
+            
+            minute_groups[minute_key]["state"][account_state.account_name][account_state.connector_name] = token_info
+        
+        # Convert to list and maintain chronological order (most recent first)
+        history = list(minute_groups.values())
+        history.sort(key=lambda x: x["timestamp"], reverse=True)
         
         return history, next_cursor, has_more
     
