@@ -1,19 +1,19 @@
 services:
-  backend-api:
-    container_name: backend-api
-    image: hummingbot/backend-api:latest
+  hummingbot-api:
+    container_name: hummingbot-api
+    image: hummingbot/hummingbot-api:latest
     ports:
       - "8000:8000"
     volumes:
-      - ./bots:/backend-api/bots
+      - ./bots:/hummingbot-api/bots
       - /var/run/docker.sock:/var/run/docker.sock
     env_file:
       - .env
     environment:
       # Override specific values for Docker networking
       - BROKER_HOST=emqx
-      - DATABASE_URL=postgresql+asyncpg://hbot:backend-api@postgres:5432/backend_api
-      - BOTS_PATH=/backend-api/bots
+      - DATABASE_URL=postgresql+asyncpg://hbot:hummingbot-api@postgres:5432/hummingbot_api
+      - BOTS_PATH=/hummingbot-api/bots
     networks:
       - emqx-bridge
     depends_on:
@@ -50,13 +50,13 @@ services:
       timeout: 25s
       retries: 5
   postgres:
-    container_name: backend-postgres
+    container_name: hummingbot-postgres
     image: postgres:15
     restart: unless-stopped
     environment:
-      - POSTGRES_DB=backend_api
+      - POSTGRES_DB=hummingbot_api
       - POSTGRES_USER=hbot
-      - POSTGRES_PASSWORD=backend-api
+      - POSTGRES_PASSWORD=hummingbot-api
     volumes:
       - postgres-data:/var/lib/postgresql/data
     ports:
@@ -64,7 +64,7 @@ services:
     networks:
       - emqx-bridge
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hbot -d backend_api"]
+      test: ["CMD-SHELL", "pg_isready -U hbot -d hummingbot_api"]
       interval: 10s
       timeout: 5s
       retries: 5

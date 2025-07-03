@@ -27,10 +27,10 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the conda environment from builder
-COPY --from=builder /opt/conda/envs/backend-api /opt/conda/envs/backend-api
+COPY --from=builder /opt/conda/envs/hummingbot-api /opt/conda/envs/hummingbot-api
 
 # Set the working directory
-WORKDIR /backend-api
+WORKDIR /hummingbot-api
 
 # Copy only necessary application files
 COPY main.py config.py deps.py ./
@@ -43,14 +43,14 @@ COPY bots/controllers ./bots/controllers
 COPY bots/scripts ./bots/scripts
 
 # Create necessary directories
-RUN mkdir -p bots/instances bots/conf bots/credentials bots/data
+RUN mkdir -p bots/instances bots/conf bots/credentials bots/data bots/archived
 
 # Expose port
 EXPOSE 8000
 
 # Set environment variables to ensure conda env is used
-ENV PATH="/opt/conda/envs/backend-api/bin:$PATH"
-ENV CONDA_DEFAULT_ENV=backend-api
+ENV PATH="/opt/conda/envs/hummingbot-api/bin:$PATH"
+ENV CONDA_DEFAULT_ENV=hummingbot-api
 
 # Run the application
 ENTRYPOINT ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
