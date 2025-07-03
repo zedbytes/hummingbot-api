@@ -4,7 +4,7 @@ from hummingbot.client.config.config_helpers import ClientConfigAdapter
 from pydantic import SecretStr
 
 
-class BackendAPIConfigAdapter(ClientConfigAdapter):
+class HummingbotAPIConfigAdapter(ClientConfigAdapter):
     def _encrypt_secrets(self, conf_dict: Dict[str, Any]):
         from utils.security import BackendAPISecurity
         for attr, value in conf_dict.items():
