@@ -14,7 +14,7 @@ from hummingbot.connector.exchange_py_base import ExchangePyBase
 from hummingbot.core.data_type.common import PositionMode
 from hummingbot.core.utils.async_utils import safe_ensure_future
 
-from utils.backend_api_config_adapter import BackendAPIConfigAdapter
+from utils.hummingbot_api_config_adapter import HummingbotAPIConfigAdapter
 from utils.file_system import FileSystemUtil, fs_util
 from utils.security import BackendAPISecurity
 
@@ -112,7 +112,7 @@ class ConnectorManager:
         :param connector_name: The name of the connector.
         :return: The connector config map.
         """
-        connector_config = BackendAPIConfigAdapter(AllConnectorSettings.get_connector_config_keys(connector_name))
+        connector_config = HummingbotAPIConfigAdapter(AllConnectorSettings.get_connector_config_keys(connector_name))
         return [key for key in connector_config.hb_config.__fields__.keys() if key != "connector"]
     
     async def update_connector_keys(self, account_name: str, connector_name: str, keys: dict):
@@ -125,7 +125,7 @@ class ConnectorManager:
         :return: The updated connector instance.
         """
         BackendAPISecurity.login_account(account_name=account_name, secrets_manager=self.secrets_manager)
-        connector_config = BackendAPIConfigAdapter(AllConnectorSettings.get_connector_config_keys(connector_name))
+        connector_config = HummingbotAPIConfigAdapter(AllConnectorSettings.get_connector_config_keys(connector_name))
         
         for key, value in keys.items():
             setattr(connector_config, key, value)

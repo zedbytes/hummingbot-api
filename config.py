@@ -18,7 +18,7 @@ class DatabaseSettings(BaseSettings):
     """Database configuration."""
     
     url: str = Field(
-        default="postgresql+asyncpg://hbot:hummingbot-api@localhost:5432/backend_api",
+        default="postgresql+asyncpg://hbot:hummingbot-api@localhost:5432/hummingbot_api",
         description="Database connection URL"
     )
 

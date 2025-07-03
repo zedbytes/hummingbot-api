@@ -11,7 +11,7 @@ from hummingbot.client.config.config_helpers import (
 from hummingbot.client.config.security import Security
 
 from config import settings
-from utils.backend_api_config_adapter import BackendAPIConfigAdapter
+from utils.hummingbot_api_config_adapter import HummingbotAPIConfigAdapter
 from utils.file_system import fs_util
 
 
@@ -41,11 +41,11 @@ class BackendAPISecurity(Security):
         cls._secure_configs[connector_name] = cls.load_connector_config_map_from_file(file_path)
 
     @classmethod
-    def load_connector_config_map_from_file(cls, yml_path: Path) -> BackendAPIConfigAdapter:
+    def load_connector_config_map_from_file(cls, yml_path: Path) -> HummingbotAPIConfigAdapter:
         config_data = read_yml_file(yml_path)
         connector_name = connector_name_from_file(yml_path)
         hb_config = get_connector_hb_config(connector_name).model_validate(config_data)
-        config_map = BackendAPIConfigAdapter(hb_config)
+        config_map = HummingbotAPIConfigAdapter(hb_config)
         config_map.decrypt_all_secure_data()
         return config_map
 
