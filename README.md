@@ -42,8 +42,8 @@ Enables real-time communication with trading bots:
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/hummingbot/backend-api.git
-   cd backend-api
+   git clone https://github.com/hummingbot/hummingbot-api.git
+   cd hummingbot-api
    ```
 
 2. **Make setup script executable and run it**
@@ -111,67 +111,90 @@ Once the API is running, you can access it at `http://localhost:8000`
 The Hummingbot API is organized into several functional routers:
 
 ### 🐳 Docker Management (`/docker`)
-- Check running containers and images
-- Pull new Docker images  
+- Check Docker daemon status and health
+- Pull new Docker images with async support
 - Start, stop, and remove containers
-- Monitor container status and health
+- Monitor active and exited containers
 - Clean up exited containers
 - Archive container data locally or to S3
+- Track image pull status and progress
 
 ### 💳 Account Management (`/accounts`)
 - Create and delete trading accounts
 - Add/remove exchange credentials
-- Monitor account states and balances
-- View portfolio distribution
-- Track positions and funding payments
+- List available credentials per account
+- Basic account configuration
+
+### 🔌 Connector Discovery (`/connectors`)
+**Provides exchange connector information and configuration**
+- List available exchange connectors
+- Get connector configuration requirements
+- Retrieve trading rules and constraints
+- Query supported order types per connector
+
+### 📊 Portfolio Management (`/portfolio`)
+**Centralized portfolio tracking and analytics**
+- **Real-time Portfolio State**: Current balances across all accounts
+- **Portfolio History**: Time-series data with cursor-based pagination
+- **Token Distribution**: Aggregate holdings by token across exchanges
+- **Account Distribution**: Percentage-based portfolio allocation analysis
+- **Advanced Filtering**: Filter by account names and connectors
 
 ### 💹 Trading Operations (`/trading`)
-**Enhanced with cursor-based pagination and comprehensive order/trade management**
-- **Order Management**: Place, cancel, and monitor orders across all exchanges
-- **Position Tracking**: Real-time positions with PnL, margin, and funding data
-- **Historical Data**: Paginated order history with advanced filtering
+**Enhanced with POST-based filtering and comprehensive order/trade management**
+- **Order Placement**: Execute trades with advanced order types
+- **Order Cancellation**: Cancel specific orders by ID
+- **Position Tracking**: Real-time perpetual positions with PnL data
 - **Active Orders**: Live order monitoring from connector in-flight orders
-- **Trade History**: Complete trade execution records with filtering
-- **Funding Payments**: Historical funding payment tracking for perpetual positions
-- **Portfolio Monitoring**: Real-time balance and portfolio state tracking
+- **Order History**: Paginated historical orders with advanced filtering
+- **Trade History**: Complete execution records with filtering
+- **Funding Payments**: Historical funding payment tracking for perpetuals
 - **Position Modes**: Configure HEDGE/ONEWAY modes for perpetual trading
 - **Leverage Management**: Set and adjust leverage per trading pair
 
 ### 🤖 Bot Orchestration (`/bot-orchestration`)
-- Discover and manage active bots
-- Deploy new Hummingbot instances
-- Start/stop automated strategies
-- Monitor bot performance in real-time
+- Monitor bot status and MQTT connectivity
+- Deploy V2 scripts and controllers
+- Start/stop bots with configurable parameters
+- Stop and archive bots with background task support
+- Retrieve bot performance history
+- Real-time bot status monitoring
 
 ### 📋 Strategy Management
-- **Controllers** (`/controllers`): Manage advanced strategy controllers
+- **Controllers** (`/controllers`): Manage V2 strategy controllers
+  - CRUD operations on controller files
+  - Controller configuration management
+  - Bot-specific controller configurations
+  - Template retrieval for new configs
 - **Scripts** (`/scripts`): Handle traditional Hummingbot scripts
-- Create, edit, and remove strategy files
-- Configure strategy parameters
+  - CRUD operations on script files
+  - Script configuration management
+  - Configuration templates
 
 ### 📊 Market Data (`/market-data`)
-**Completely enhanced with professional order book analysis and real-time data**
-- **Price Discovery**: Real-time prices for multiple trading pairs, funding rates, mark/index prices
-- **Order Book Analysis**: Live snapshots, price impact analysis, liquidity analysis, VWAP calculations
-- **Historical Data**: Real-time and historical candle data with configurable intervals
-- **Feed Management**: Active feed monitoring, automatic cleanup, lifecycle management
+**Professional market data analysis and real-time feeds**
+- **Price Discovery**: Real-time prices, funding rates, mark/index prices
+- **Candle Data**: Real-time and historical candles with multiple intervals
+- **Order Book Analysis**: 
+  - Live order book snapshots
+  - Price impact calculations
+  - Volume queries at specific price levels
+  - VWAP (Volume-Weighted Average Price) calculations
+- **Feed Management**: Active feed monitoring with automatic cleanup
 
 ### 🔄 Backtesting (`/backtesting`)
-- Test strategies against historical data
-- Analyze strategy performance
-- Optimize parameters
+- Run strategy backtests against historical data
+- Support for controller configurations
+- Customizable trade costs and resolution
 
-### 📈 Analytics (`/archived-bots`)
-- Analyze performance of stopped bots
-- Generate comprehensive reports
-- Review historical trades and orders
-- Extract insights from past strategies
-
-### 🗄️ Database Management (`/databases`)
-- List and manage bot databases
-- Query trading data across multiple bots
-- Analyze historical performance
-- Database health monitoring
+### 📈 Archived Bot Analytics (`/archived-bots`)
+**Comprehensive analysis of stopped bot performance**
+- List and discover archived bot databases
+- Performance metrics and trade analysis
+- Historical order and trade retrieval
+- Position and executor data extraction
+- Controller configuration recovery
+- Support for both V1 and V2 bot architectures
 
 ## Configuration
 

@@ -1,4 +1,4 @@
-name: backend-api
+name: hummingbot-api
 channels:
   - conda-forge
   - defaults

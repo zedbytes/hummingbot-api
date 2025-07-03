@@ -145,7 +145,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-logfire.configure(send_to_logfire="if-token-present", environment=settings.app.logfire_environment, service_name="backend-api")
+logfire.configure(send_to_logfire="if-token-present", environment=settings.app.logfire_environment, service_name="hummingbot-api")
 logfire.instrument_fastapi(app)
 
 def auth_user(

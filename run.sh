@@ -10,7 +10,7 @@ if [[ "$1" == "--dev" ]]; then
     # Activate conda environment and run with uvicorn
     docker compose up emqx postgres -d
     source "$(conda info --base)/etc/profile.d/conda.sh"
-    conda activate backend-api
+    conda activate hummingbot-api
     uvicorn main:app --reload
 else
     echo "Running with Docker Compose..."

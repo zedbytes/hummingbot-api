@@ -5,8 +5,8 @@
 .PHONY: uninstall
 .PHONY: install
 .PHONY: install-pre-commit
-.PHONY: docker_build
-.PHONY: docker_run
+.PHONY: build
+.PHONY: deploy
 
 
 detect_conda_bin := $(shell bash -c 'if [ "${CONDA_EXE} " == " " ]; then \
@@ -26,25 +26,25 @@ run:
 	uvicorn main:app --reload
 
 uninstall:
-	conda env remove -n backend-api -y
+	conda env remove -n hummingbot-api -y
 
 install:
-	if conda env list | grep -q '^backend-api '; then \
+	if conda env list | grep -q '^hummingbot-api '; then \
 	    echo "Environment already exists."; \
 	else \
 	    conda env create -f environment.yml; \
 	fi
-	conda activate backend-api
+	conda activate hummingbot-api
 	$(MAKE) install-pre-commit
 
 install-pre-commit:
-	/bin/bash -c 'source "${CONDA_BIN}/activate" backend-api && \
+	/bin/bash -c 'source "${CONDA_BIN}/activate" hummingbot-api && \
 	if ! conda list pre-commit | grep pre-commit &> /dev/null; then \
 	    pip install pre-commit; \
 	fi && pre-commit install'
 
-docker_build:
-	docker build -t hummingbot/backend-api:latest .
+build:
+	docker build -t hummingbot/hummingbot-api:latest .
 
-docker_run:
+deploy:
 	docker compose up -d
