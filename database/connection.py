@@ -29,7 +29,7 @@ class AsyncDatabaseManager:
             echo_pool=False,  # Set to True for connection pool logging
             # Connection arguments for asyncpg
             connect_args={
-                "server_settings": {"application_name": "backend-api"},
+                "server_settings": {"application_name": "hummingbot-api"},
                 "command_timeout": 60,
             }
         )
