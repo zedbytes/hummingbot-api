@@ -15,14 +15,22 @@ class AccountRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def save_account_state(self, account_name: str, connector_name: str, tokens_info: List[Dict]) -> AccountState:
+    async def save_account_state(self, account_name: str, connector_name: str, tokens_info: List[Dict], 
+                                snapshot_timestamp: Optional[datetime] = None) -> AccountState:
         """
         Save account state with token information to the database.
+        If snapshot_timestamp is provided, use it instead of server default.
         """
-        account_state = AccountState(
-            account_name=account_name,
-            connector_name=connector_name
-        )
+        account_state_data = {
+            "account_name": account_name,
+            "connector_name": connector_name
+        }
+        
+        # If a specific timestamp is provided, use it instead of server default
+        if snapshot_timestamp:
+            account_state_data["timestamp"] = snapshot_timestamp
+            
+        account_state = AccountState(**account_state_data)
         
         self.session.add(account_state)
         await self.session.flush()  # Get the ID

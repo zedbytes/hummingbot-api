@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Create module-specific logger
 logger = logging.getLogger(__name__)
@@ -117,19 +117,23 @@ class AccountsService:
     async def dump_account_state(self):
         """
         Save the current account state to the database.
+        All account/connector combinations from the same snapshot will use the same timestamp.
         :return:
         """
         await self.ensure_db_initialized()
         
         try:
+            # Generate a single timestamp for this entire snapshot
+            snapshot_timestamp = datetime.now(timezone.utc)
+            
             async with self.db_manager.get_session_context() as session:
                 repository = AccountRepository(session)
                 
-                # Save each account-connector combination
+                # Save each account-connector combination with the same timestamp
                 for account_name, connectors in self.accounts_state.items():
                     for connector_name, tokens_info in connectors.items():
                         if tokens_info:  # Only save if there's token data
-                            await repository.save_account_state(account_name, connector_name, tokens_info)
+                            await repository.save_account_state(account_name, connector_name, tokens_info, snapshot_timestamp)
                             
         except Exception as e:
             logger.error(f"Error saving account state to database: {e}")
