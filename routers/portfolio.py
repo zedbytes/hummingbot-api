@@ -69,13 +69,17 @@ async def get_portfolio_history(
         Paginated response with historical portfolio data
     """
     try:
+        # Convert integer timestamps to datetime objects
+        start_time_dt = datetime.fromtimestamp(filter_request.start_time / 1000) if filter_request.start_time else None
+        end_time_dt = datetime.fromtimestamp(filter_request.end_time / 1000) if filter_request.end_time else None
+        
         if not filter_request.account_names:
             # Get history for all accounts
             data, next_cursor, has_more = await accounts_service.load_account_state_history(
                 limit=filter_request.limit,
                 cursor=filter_request.cursor,
-                start_time=filter_request.start_time,
-                end_time=filter_request.end_time
+                start_time=start_time_dt,
+                end_time=end_time_dt
             )
         else:
             # Get history for specific accounts - need to aggregate
@@ -85,8 +89,8 @@ async def get_portfolio_history(
                     account_name=account_name,
                     limit=filter_request.limit,
                     cursor=filter_request.cursor,
-                    start_time=filter_request.start_time,
-                    end_time=filter_request.end_time
+                    start_time=start_time_dt,
+                    end_time=end_time_dt
                 )
                 all_data.extend(acc_data)
             
@@ -119,8 +123,8 @@ async def get_portfolio_history(
                 "filters": {
                     "account_names": filter_request.account_names,
                     "connector_names": filter_request.connector_names,
-                    "start_time": filter_request.start_time.isoformat() if filter_request.start_time else None,
-                    "end_time": filter_request.end_time.isoformat() if filter_request.end_time else None
+                    "start_time": filter_request.start_time,
+                    "end_time": filter_request.end_time
                 }
             }
         )
