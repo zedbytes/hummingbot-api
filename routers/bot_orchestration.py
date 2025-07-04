@@ -242,6 +242,12 @@ async def _background_stop_and_archive(
         # Always clear the stopping status when the background task completes
         bots_manager.clear_bot_stopping(bot_name_for_orchestrator)
         logger.info(f"Cleared stopping status for bot {bot_name}")
+        
+        # Remove bot from active_bots and clear all MQTT data
+        if bot_name_for_orchestrator in bots_manager.active_bots:
+            bots_manager.mqtt_manager.clear_bot_data(bot_name_for_orchestrator)
+            del bots_manager.active_bots[bot_name_for_orchestrator]
+            logger.info(f"Removed bot {bot_name_for_orchestrator} from active_bots and cleared MQTT data")
 
 
 @router.post("/stop-and-archive-bot/{bot_name}")

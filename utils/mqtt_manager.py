@@ -452,6 +452,8 @@ class MQTTManager:
         self._bot_logs.pop(bot_id, None)
         self._bot_error_logs.pop(bot_id, None)
 
+        self._discovered_bots.pop(bot_id, None)
+
     def clear_bot_performance(self, bot_id: str):
         """Clear only performance data for a bot (useful when bot is stopped)."""
         self._bot_performance.pop(bot_id, None)
