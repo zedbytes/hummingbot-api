@@ -238,6 +238,10 @@ async def _background_stop_and_archive(
             
     except Exception as e:
         logging.error(f"Error in background stop-and-archive for {bot_name}: {str(e)}")
+    finally:
+        # Always clear the stopping status when the background task completes
+        bots_manager.clear_bot_stopping(bot_name_for_orchestrator)
+        logger.info(f"Cleared stopping status for bot {bot_name}")
 
 
 @router.post("/stop-and-archive-bot/{bot_name}")
@@ -291,6 +295,9 @@ async def stop_and_archive_bot(
         
         # Use the format that's actually stored in active bots
         bot_name_for_orchestrator = container_name if container_name in active_bots else actual_bot_name
+        
+        # Mark the bot as stopping before starting the background task
+        bots_manager.set_bot_stopping(bot_name_for_orchestrator)
         
         # Add the background task
         background_tasks.add_task(
