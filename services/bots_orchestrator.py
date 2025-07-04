@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from typing import Optional
+import re
 
 import docker
 
@@ -36,9 +37,12 @@ class BotsOrchestrator:
 
     @staticmethod
     def hummingbot_containers_fiter(container):
-        """Filter for Hummingbot containers."""
+        """Filter for Hummingbot containers based on image name pattern."""
         try:
-            return "hummingbot" in container.name and "broker" not in container.name
+            # Get the image name (first tag if available, otherwise the image ID)
+            image_name = container.image.tags[0] if container.image.tags else str(container.image)
+            pattern = r'.+/hummingbot:'
+            return bool(re.match(pattern, image_name))
         except Exception:
             return False
 
