@@ -175,3 +175,38 @@ class FundingPayment(Base):
     exchange_funding_id = Column(String, nullable=True, index=True)  # Exchange funding ID
 
 
+class BotRun(Base):
+    __tablename__ = "bot_runs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Bot identification
+    bot_name = Column(String, nullable=False, index=True)
+    instance_name = Column(String, nullable=False, index=True)
+    
+    # Deployment info
+    deployed_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False, index=True)
+    strategy_type = Column(String, nullable=False, index=True)  # 'script' or 'controller'
+    strategy_name = Column(String, nullable=False, index=True)
+    config_name = Column(String, nullable=True, index=True)
+    
+    # Runtime tracking
+    started_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
+    stopped_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
+    
+    # Status tracking
+    deployment_status = Column(String, nullable=False, default="DEPLOYED", index=True)  # DEPLOYED, FAILED, ARCHIVED
+    run_status = Column(String, nullable=False, default="CREATED", index=True)  # CREATED, RUNNING, STOPPED, ERROR
+    
+    # Configuration and final state
+    deployment_config = Column(Text, nullable=True)  # JSON of full deployment config
+    final_status = Column(Text, nullable=True)  # JSON of final bot state, performance, etc.
+    
+    # Account info
+    account_name = Column(String, nullable=False, index=True)
+    
+    # Metadata
+    image_version = Column(String, nullable=True, index=True)
+    error_message = Column(Text, nullable=True)
+
+
