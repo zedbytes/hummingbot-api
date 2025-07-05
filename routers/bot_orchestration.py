@@ -141,16 +141,7 @@ async def start_bot(
     response = await bots_manager.start_bot(action.bot_name, log_level=action.log_level, script=action.script,
                                       conf=action.conf, async_backend=action.async_backend)
     
-    # Update bot run status to RUNNING if start was successful
-    if response.get("success"):
-        try:
-            async with db_manager.get_session_context() as session:
-                bot_run_repo = BotRunRepository(session)
-                await bot_run_repo.update_bot_run_started(action.bot_name)
-                logger.info(f"Updated bot run status to RUNNING for {action.bot_name}")
-        except Exception as e:
-            logger.error(f"Failed to update bot run status: {e}")
-            # Don't fail the start operation if bot run update fails
+    # Bot run tracking simplified - only track deployment and stop times
     
     return {"status": "success", "response": response}
 

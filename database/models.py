@@ -191,7 +191,6 @@ class BotRun(Base):
     config_name = Column(String, nullable=True, index=True)
     
     # Runtime tracking
-    started_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
     stopped_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
     
     # Status tracking
