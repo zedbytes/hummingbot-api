@@ -90,7 +90,7 @@ class BotsOrchestrator:
                 docker_bots = await self.get_active_containers()
 
                 # Get bots from MQTT messages (auto-discovered)
-                mqtt_bots = self.mqtt_manager.get_discovered_bots(timeout_seconds=300)  # 5 minute timeout
+                mqtt_bots = self.mqtt_manager.get_discovered_bots(timeout_seconds=30)  # 30 second timeout
 
                 # Combine both sources
                 all_active_bots = set(docker_bots + mqtt_bots)
@@ -304,3 +304,4 @@ class BotsOrchestrator:
     def is_bot_stopping(self, bot_name: str) -> bool:
         """Check if a bot is currently being stopped."""
         return bot_name in self.stopping_bots
+    
