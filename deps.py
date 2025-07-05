@@ -4,6 +4,7 @@ from services.accounts_service import AccountsService
 from services.docker_service import DockerService
 from services.market_data_feed_manager import MarketDataFeedManager
 from utils.bot_archiver import BotArchiver
+from database import AsyncDatabaseManager
 
 
 def get_bots_orchestrator(request: Request) -> BotsOrchestrator:
@@ -29,3 +30,8 @@ def get_market_data_feed_manager(request: Request) -> MarketDataFeedManager:
 def get_bot_archiver(request: Request) -> BotArchiver:
     """Get BotArchiver from app state."""
     return request.app.state.bot_archiver
+
+
+def get_database_manager(request: Request) -> AsyncDatabaseManager:
+    """Get AsyncDatabaseManager from app state."""
+    return request.app.state.accounts_service.db_manager
