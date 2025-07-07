@@ -101,6 +101,7 @@ class V2ScriptDeployment(BaseModel):
     image: str = Field(default="hummingbot/hummingbot:latest", description="Docker image for the Hummingbot instance")
     script: Optional[str] = Field(default=None, description="Name of the script to run (without .py extension)")
     script_config: Optional[str] = Field(default=None, description="Name of the script configuration file (without .yml extension)")
+    headless: bool = Field(default=False, description="Run in headless mode (no UI)")
 
 
 class V2ControllerDeployment(BaseModel):
@@ -111,3 +112,4 @@ class V2ControllerDeployment(BaseModel):
     max_global_drawdown_quote: Optional[float] = Field(default=None, description="Maximum allowed global drawdown in quote usually USDT")
     max_controller_drawdown_quote: Optional[float] = Field(default=None, description="Maximum allowed per-controller drawdown in quote usually USDT")
     image: str = Field(default="hummingbot/hummingbot:latest", description="Docker image for the Hummingbot instance")
+    headless: bool = Field(default=False, description="Run in headless mode (no UI)")
