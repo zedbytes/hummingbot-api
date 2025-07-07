@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 
 from sqlalchemy import desc, select, and_, or_, func
@@ -81,6 +81,7 @@ class BotRunRepository:
         
         if bot_run:
             bot_run.deployment_status = "ARCHIVED"
+            bot_run.stopped_at = datetime.now(timezone.utc)
             await self.session.flush()
             await self.session.refresh(bot_run)
             
