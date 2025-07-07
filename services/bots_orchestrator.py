@@ -93,7 +93,7 @@ class BotsOrchestrator:
                 mqtt_bots = self.mqtt_manager.get_discovered_bots(timeout_seconds=30)  # 30 second timeout
 
                 # Combine both sources
-                all_active_bots = set(docker_bots + mqtt_bots)
+                all_active_bots = set([bot for bot in docker_bots + mqtt_bots if not self.is_bot_stopping(bot)])
 
                 # Remove bots that are no longer active
                 for bot_name in list(self.active_bots):
