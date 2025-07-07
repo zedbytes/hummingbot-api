@@ -82,7 +82,7 @@ class BotsOrchestrator:
         # Stop MQTT manager asynchronously
         asyncio.create_task(self.mqtt_manager.stop())
 
-    async def update_active_bots(self, sleep_time=1):
+    async def update_active_bots(self, sleep_time=1.0):
         """Monitor and update active bots list using both Docker and MQTT discovery."""
         while True:
             try:
@@ -236,9 +236,10 @@ class BotsOrchestrator:
         return cleaned_performance
 
     def get_all_bots_status(self):
+        # TODO: improve logic of bots state management
         """Get status information for all active bots."""
         all_bots_status = {}
-        for bot in self.active_bots:
+        for bot in [bot for bot in self.active_bots if not self.is_bot_stopping(bot)]:
             status = self.get_bot_status(bot)
             status["source"] = self.active_bots[bot].get("source", "unknown")
             all_bots_status[bot] = status
