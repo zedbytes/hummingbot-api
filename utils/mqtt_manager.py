@@ -33,6 +33,10 @@ class MQTTManager:
 
         # Auto-discovered bots
         self._discovered_bots: Dict[str, float] = {}  # bot_id: last_seen_timestamp
+        
+        # Message deduplication tracking
+        self._processed_messages: Dict[str, float] = {}  # message_hash: timestamp
+        self._message_ttl = 300  # 5 minutes TTL for processed messages
 
         # Connection state
         self._connected = False
@@ -186,17 +190,47 @@ class MQTTManager:
                 self._bot_performance[bot_id][controller_id] = performance
 
     async def _handle_log(self, bot_id: str, data: Any):
-        """Handle log messages."""
+        """Handle log messages with deduplication."""
+        # Create a unique message identifier for deduplication
         if isinstance(data, dict):
-            # Check for different possible field names
             level = data.get("level_name") or data.get("levelname") or data.get("level", "INFO")
             message = data.get("msg") or data.get("message", "")
+            timestamp = data.get("timestamp") or data.get("time") or time.time()
+            
+            # Create hash for deduplication (bot_id + message + timestamp within 1 second)
+            message_hash = f"{bot_id}:{message}:{int(timestamp)}"
+        elif isinstance(data, str):
+            message = data
+            timestamp = time.time()
+            level = "INFO"
+            
+            # Create hash for string messages
+            message_hash = f"{bot_id}:{message}:{int(timestamp)}"
+        else:
+            return  # Skip invalid data
 
+        # Check for duplicates
+        current_time = time.time()
+        if message_hash in self._processed_messages:
+            # Skip duplicate message
+            logger.debug(f"Skipping duplicate log message from {bot_id}: {message[:50]}...")
+            return
+
+        # Clean up old message hashes (older than TTL)
+        expired_hashes = [h for h, t in self._processed_messages.items() if current_time - t > self._message_ttl]
+        for h in expired_hashes:
+            del self._processed_messages[h]
+
+        # Record this message as processed
+        self._processed_messages[message_hash] = current_time
+
+        # Process the message
+        if isinstance(data, dict):
             # Normalize the log entry
             log_entry = {
                 "level_name": level,
                 "msg": message,
-                "timestamp": data.get("timestamp") or data.get("time") or time.time(),
+                "timestamp": timestamp,
                 **data,  # Include all original fields
             }
 
@@ -206,7 +240,7 @@ class MQTTManager:
                 self._bot_logs[bot_id].append(log_entry)
         elif isinstance(data, str):
             # Handle plain string logs
-            log_entry = {"level_name": "INFO", "msg": data, "timestamp": time.time()}
+            log_entry = {"level_name": "INFO", "msg": data, "timestamp": timestamp}
             self._bot_logs[bot_id].append(log_entry)
 
     async def _handle_notify(self, bot_id: str, data: Any):
