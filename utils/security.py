@@ -60,17 +60,14 @@ class BackendAPISecurity(Security):
 
     @staticmethod
     def new_password_required() -> bool:
-        return not Path(settings.app.password_verification_path).exists()
-
-    @staticmethod
-    def store_password_verification(secrets_manager: BaseSecretsManager):
-        encrypted_word = secrets_manager.encrypt_secret_value(PASSWORD_VERIFICATION_WORD, PASSWORD_VERIFICATION_WORD)
-        fs_util.ensure_file_and_dump_text(settings.app.password_verification_path, encrypted_word)
+        full_path = fs_util._get_full_path(settings.app.password_verification_path)
+        return not Path(full_path).exists()
 
     @staticmethod
     def validate_password(secrets_manager: BaseSecretsManager) -> bool:
         valid = False
-        with open(settings.app.password_verification_path, "r") as f:
+        full_path = fs_util._get_full_path(settings.app.password_verification_path)
+        with open(full_path, "r") as f:
             encrypted_word = f.read()
         try:
             decrypted_word = secrets_manager.decrypt_secret_value(PASSWORD_VERIFICATION_WORD, encrypted_word)
@@ -79,3 +76,8 @@ class BackendAPISecurity(Security):
             if str(e) != "MAC mismatch":
                 raise e
         return valid
+
+    @staticmethod
+    def store_password_verification(secrets_manager: BaseSecretsManager):
+        encrypted_word = secrets_manager.encrypt_secret_value(PASSWORD_VERIFICATION_WORD, PASSWORD_VERIFICATION_WORD)
+        fs_util.ensure_file_and_dump_text(settings.app.password_verification_path, encrypted_word)

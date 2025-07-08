@@ -70,7 +70,7 @@ class AppSettings(BaseSettings):
     # Static paths
     controllers_path: str = "bots/conf/controllers"
     controllers_module: str = "bots.controllers"
-    password_verification_path: str = "bots/credentials/master_account/.password_verification"
+    password_verification_path: str = "credentials/master_account/.password_verification"
     
     # Environment-configurable settings
     logfire_environment: str = Field(
