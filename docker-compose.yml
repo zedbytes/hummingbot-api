@@ -13,7 +13,6 @@ services:
       # Override specific values for Docker networking
       - BROKER_HOST=emqx
       - DATABASE_URL=postgresql+asyncpg://hbot:hummingbot-api@postgres:5432/hummingbot_api
-      - BOTS_PATH=/hummingbot-api/bots
     networks:
       - emqx-bridge
     depends_on:
