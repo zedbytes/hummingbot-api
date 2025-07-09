@@ -1085,6 +1085,9 @@ class AccountsService:
             raise HTTPException(status_code=400, detail=f"Connector '{connector_name}' does not support position tracking")
         
         try:
+            # Force position update to ensure current market prices are used
+            await connector._update_positions()
+            
             positions = []
             raw_positions = connector.account_positions
             
