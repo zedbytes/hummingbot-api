@@ -5,8 +5,23 @@ from typing import Annotated
 import logfire
 import logging
 from dotenv import load_dotenv
+
 # Load environment variables early
 load_dotenv()
+
+# Monkey patch save_to_yml to prevent writes to library directory
+def patched_save_to_yml(yml_path, cm):
+    """Patched version of save_to_yml that prevents writes to library directory"""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.debug(f"Skipping config write to {yml_path} (patched for API mode)")
+    # Do nothing - this prevents the original function from trying to write to the library directory
+
+# Apply the patch before importing hummingbot components
+from hummingbot.client.config import config_helpers
+config_helpers.save_to_yml = patched_save_to_yml
+
+from hummingbot.core.rate_oracle.rate_oracle import RateOracle
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -96,6 +111,7 @@ async def lifespan(app: FastAPI):
     # Initialize MarketDataFeedManager with lifecycle management
     market_data_feed_manager = MarketDataFeedManager(
         market_data_provider=market_data_provider,
+        rate_oracle=RateOracle.get_instance(),
         cleanup_interval=settings.market_data.cleanup_interval,
         feed_timeout=settings.market_data.feed_timeout
     )
