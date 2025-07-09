@@ -3,8 +3,6 @@ import logging
 import math
 import time
 
-# Create module-specific logger
-logger = logging.getLogger(__name__)
 from typing import Any, Optional, Union
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -18,8 +16,10 @@ from hummingbot.core.event.events import (
     MarketEvent
 )
 from hummingbot.connector.connector_base import ConnectorBase
-
 from database import AsyncDatabaseManager, OrderRepository, TradeRepository
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 
 class OrdersRecorder:
@@ -172,7 +172,7 @@ class OrdersRecorder:
             async with self.db_manager.get_session_context() as session:
                 order_repo = OrderRepository(session)
                 trade_repo = TradeRepository(session)
-                
+
                 # Calculate fees
                 trade_fee_paid = 0
                 trade_fee_currency = None
@@ -185,7 +185,7 @@ class OrdersRecorder:
                             price=event.price,
                             order_amount=event.amount,
                             token=quote_asset,
-                            exchange=self._connector
+                            exchange=self._connector,
                         )
                         trade_fee_paid = float(fee_in_quote)
                         trade_fee_currency = quote_asset
