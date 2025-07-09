@@ -95,7 +95,7 @@ async def cancel_order(account_name: str, connector_name: str, client_order_id: 
             connector_name=connector_name,
             client_order_id=client_order_id
         )
-        return {"message": f"Order {cancelled_order_id} cancelled successfully"}
+        return {"message": f"Order cancellation initiated for {cancelled_order_id}"}
     except HTTPException:
         raise
     except Exception as e:

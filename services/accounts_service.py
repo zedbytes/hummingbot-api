@@ -838,16 +838,23 @@ class AccountsService:
             
         Returns:
             Client order ID that was cancelled
+            
+        Raises:
+            HTTPException: 404 if order not found, 500 if cancellation fails
         """
         connector = await self.get_connector_instance(account_name, connector_name)
         
+        # Check if order exists in in-flight orders
+        if client_order_id not in connector.in_flight_orders:
+            raise HTTPException(status_code=404, detail=f"Order '{client_order_id}' not found in active orders")
+        
         try:
             result = connector.cancel(trading_pair="NA", client_order_id=client_order_id)
-            logger.info(f"Cancelled order {client_order_id} on {connector_name} (Account: {account_name})")
+            logger.info(f"Initiated cancellation for order {client_order_id} on {connector_name} (Account: {account_name})")
             return result
         except Exception as e:
-            logger.error(f"Failed to cancel order {client_order_id}: {e}")
-            raise HTTPException(status_code=500, detail=f"Failed to cancel order: {str(e)}")
+            logger.error(f"Failed to initiate cancellation for order {client_order_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to initiate order cancellation: {str(e)}")
     
     async def set_leverage(self, account_name: str, connector_name: str, 
                           trading_pair: str, leverage: int) -> Dict[str, str]:
