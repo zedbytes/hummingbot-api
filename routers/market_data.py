@@ -3,6 +3,7 @@ import time
 
 from fastapi import APIRouter, Request, HTTPException, Depends
 from hummingbot.data_feed.candles_feed.data_types import CandlesConfig, HistoricalCandlesConfig
+from hummingbot.data_feed.candles_feed.candles_factory import CandlesFactory
 from services.market_data_feed_manager import MarketDataFeedManager
 from models import (
     PriceRequest, PricesResponse, FundingInfoRequest, FundingInfoResponse,
@@ -126,6 +127,17 @@ async def get_market_data_settings():
         "feed_timeout": settings.market_data.feed_timeout,
         "description": "cleanup_interval: seconds between cleanup runs, feed_timeout: seconds before unused feeds expire"
     }
+
+
+@router.get("/available-candle-connectors")
+async def get_available_candle_connectors():
+    """
+    Get list of available connectors that support candle data feeds.
+    
+    Returns:
+        List of connector names that can be used for fetching candle data
+    """
+    return list(CandlesFactory._candles_map.keys())
 
 
 # Enhanced Market Data Endpoints
