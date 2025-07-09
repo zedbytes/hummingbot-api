@@ -148,10 +148,10 @@ async def get_portfolio_distribution(
     """
     if not filter_request.account_names:
         # Get distribution for all accounts
-        return accounts_service.get_portfolio_distribution()
+        distribution = accounts_service.get_portfolio_distribution()
     elif len(filter_request.account_names) == 1:
         # Single account - use existing method
-        return accounts_service.get_portfolio_distribution(filter_request.account_names[0])
+        distribution = accounts_service.get_portfolio_distribution(filter_request.account_names[0])
     else:
         # Multiple accounts - need to aggregate
         aggregated_distribution = {
@@ -195,7 +195,73 @@ async def get_portfolio_distribution(
         
         aggregated_distribution["token_count"] = len(aggregated_distribution["tokens"])
         
-        return aggregated_distribution
+        distribution = aggregated_distribution
+    
+    # Apply connector filter if specified
+    if filter_request.connector_names:
+        filtered_distribution = []
+        filtered_total_value = 0
+        
+        for token_data in distribution.get("distribution", []):
+            filtered_token = {
+                "token": token_data["token"],
+                "total_value": 0,
+                "total_units": 0,
+                "percentage": 0,
+                "accounts": {}
+            }
+            
+            # Filter each account's connectors
+            for account_name, account_data in token_data.get("accounts", {}).items():
+                if "connectors" in account_data:
+                    filtered_connectors = {}
+                    account_value = 0
+                    account_units = 0
+                    
+                    # Only include specified connectors
+                    for connector_name in filter_request.connector_names:
+                        if connector_name in account_data["connectors"]:
+                            filtered_connectors[connector_name] = account_data["connectors"][connector_name]
+                            account_value += account_data["connectors"][connector_name].get("value", 0)
+                            account_units += account_data["connectors"][connector_name].get("units", 0)
+                    
+                    # Only include account if it has matching connectors
+                    if filtered_connectors:
+                        filtered_token["accounts"][account_name] = {
+                            "value": round(account_value, 6),
+                            "units": account_units,
+                            "percentage": 0,  # Will be recalculated later
+                            "connectors": filtered_connectors
+                        }
+                        
+                        filtered_token["total_value"] += account_value
+                        filtered_token["total_units"] += account_units
+            
+            # Only include token if it has values after filtering
+            if filtered_token["total_value"] > 0:
+                filtered_distribution.append(filtered_token)
+                filtered_total_value += filtered_token["total_value"]
+        
+        # Recalculate percentages after filtering
+        if filtered_total_value > 0:
+            for token_data in filtered_distribution:
+                token_data["percentage"] = round((token_data["total_value"] / filtered_total_value) * 100, 4)
+                # Update account percentages
+                for account_data in token_data["accounts"].values():
+                    account_data["percentage"] = round((account_data["value"] / filtered_total_value) * 100, 4)
+        
+        # Sort by value (descending)
+        filtered_distribution.sort(key=lambda x: x["total_value"], reverse=True)
+        
+        # Update the distribution
+        distribution = {
+            "total_portfolio_value": round(filtered_total_value, 6),
+            "token_count": len(filtered_distribution),
+            "distribution": filtered_distribution,
+            "account_filter": distribution.get("account_filter", "filtered")
+        }
+    
+    return distribution
 
 
 @router.post("/accounts-distribution")
