@@ -92,7 +92,7 @@ class OrderBookRequest(BaseModel):
     """Request model for getting order book data"""
     connector_name: str = Field(description="Name of the connector")
     trading_pair: str = Field(description="Trading pair")
-    depth: int = Field(default=10, ge=1, le=100, description="Number of price levels to return")
+    depth: int = Field(default=10, ge=1, le=1000, description="Number of price levels to return")
 
 
 class OrderBookLevel(BaseModel):
