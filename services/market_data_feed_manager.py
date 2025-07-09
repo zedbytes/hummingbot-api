@@ -4,6 +4,7 @@ from typing import Dict, Optional, Callable, List
 import logging
 from enum import Enum
 
+from hummingbot.core.rate_oracle.rate_oracle import RateOracle
 from hummingbot.data_feed.candles_feed.data_types import CandlesConfig
 from hummingbot.data_feed.market_data_provider import MarketDataProvider
 
@@ -25,7 +26,7 @@ class MarketDataFeedManager:
     are automatically stopped and cleaned up.
     """
     
-    def __init__(self, market_data_provider: MarketDataProvider, cleanup_interval: int = 300, feed_timeout: int = 600):
+    def __init__(self, market_data_provider: MarketDataProvider, rate_oracle: RateOracle, cleanup_interval: int = 300, feed_timeout: int = 600):
         """
         Initialize the MarketDataFeedManager.
         
@@ -35,6 +36,7 @@ class MarketDataFeedManager:
             feed_timeout: How long to keep unused feeds alive (seconds, default: 10 minutes)
         """
         self.market_data_provider = market_data_provider
+        self.rate_oracle = rate_oracle
         self.cleanup_interval = cleanup_interval
         self.feed_timeout = feed_timeout
         self.last_access_times: Dict[str, float] = {}
@@ -55,6 +57,7 @@ class MarketDataFeedManager:
         if not self._is_running:
             self._is_running = True
             self._cleanup_task = asyncio.create_task(self._cleanup_loop())
+            self.rate_oracle.start()
             self.logger.info(f"MarketDataFeedManager started with cleanup_interval={self.cleanup_interval}s, feed_timeout={self.feed_timeout}s")
     
     def stop(self):
