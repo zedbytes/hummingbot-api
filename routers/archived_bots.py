@@ -68,8 +68,8 @@ async def get_database_summary(db_path: str):
             "total_executors": len(executors),
             "total_positions": len(positions),
             "total_controllers": len(controllers),
-            "trading_pairs": orders["symbol"].unique().tolist() if len(orders) > 0 else [],
-            "exchanges": orders["market"].unique().tolist() if len(orders) > 0 else [],
+            "trading_pairs": orders["trading_pair"].unique().tolist() if len(orders) > 0 else [],
+            "exchanges": orders["connector_name"].unique().tolist() if len(orders) > 0 else [],
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error analyzing database: {str(e)}")
@@ -111,8 +111,8 @@ async def get_database_performance(db_path: str):
             "final_unrealized_pnl_quote": float(final_row.get('unrealized_trade_pnl_quote', 0)),
             "total_fees_quote": float(performance_data['fees_quote'].sum()),
             "final_net_position": float(final_row.get('net_position', 0)),
-            "trading_pairs": performance_data['symbol'].unique().tolist(),
-            "markets": performance_data['market'].unique().tolist()
+            "trading_pairs": performance_data['trading_pair'].unique().tolist(),
+            "connector_names": performance_data['connector_name'].unique().tolist()
         }
         
         return {

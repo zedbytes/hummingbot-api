@@ -975,8 +975,8 @@ class AccountsService:
             logger.error(f"Failed to get position mode: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to get position mode: {str(e)}")
 
-    async def get_orders(self, account_name: Optional[str] = None, market: Optional[str] = None, 
-                        symbol: Optional[str] = None, status: Optional[str] = None,
+    async def get_orders(self, account_name: Optional[str] = None, connector_name: Optional[str] = None,
+                        trading_pair: Optional[str] = None, status: Optional[str] = None,
                         start_time: Optional[int] = None, end_time: Optional[int] = None,
                         limit: int = 100, offset: int = 0) -> List[Dict]:
         """Get order history using OrderRepository."""
@@ -987,8 +987,8 @@ class AccountsService:
                 order_repo = OrderRepository(session)
                 orders = await order_repo.get_orders(
                     account_name=account_name,
-                    connector_name=market,
-                    trading_pair=symbol,
+                    connector_name=connector_name,
+                    trading_pair=trading_pair,
                     status=status,
                     start_time=start_time,
                     end_time=end_time,
@@ -1000,8 +1000,8 @@ class AccountsService:
             logger.error(f"Error getting orders: {e}")
             return []
 
-    async def get_active_orders_history(self, account_name: Optional[str] = None, market: Optional[str] = None, 
-                                       symbol: Optional[str] = None) -> List[Dict]:
+    async def get_active_orders_history(self, account_name: Optional[str] = None, connector_name: Optional[str] = None,
+                                       trading_pair: Optional[str] = None) -> List[Dict]:
         """Get active orders from database using OrderRepository."""
         await self.ensure_db_initialized()
         
@@ -1010,8 +1010,8 @@ class AccountsService:
                 order_repo = OrderRepository(session)
                 orders = await order_repo.get_active_orders(
                     account_name=account_name,
-                    connector_name=market,
-                    trading_pair=symbol
+                    connector_name=connector_name,
+                    trading_pair=trading_pair
                 )
                 return [order_repo.to_dict(order) for order in orders]
         except Exception as e:
@@ -1042,8 +1042,8 @@ class AccountsService:
                 "fill_rate": 0,
             }
 
-    async def get_trades(self, account_name: Optional[str] = None, market: Optional[str] = None,
-                        symbol: Optional[str] = None, trade_type: Optional[str] = None,
+    async def get_trades(self, account_name: Optional[str] = None, connector_name: Optional[str] = None,
+                        trading_pair: Optional[str] = None, trade_type: Optional[str] = None,
                         start_time: Optional[int] = None, end_time: Optional[int] = None,
                         limit: int = 100, offset: int = 0) -> List[Dict]:
         """Get trade history using TradeRepository."""
@@ -1054,8 +1054,8 @@ class AccountsService:
                 trade_repo = TradeRepository(session)
                 trade_order_pairs = await trade_repo.get_trades_with_orders(
                     account_name=account_name,
-                    connector_name=market,
-                    trading_pair=symbol,
+                    connector_name=connector_name,
+                    trading_pair=trading_pair,
                     trade_type=trade_type,
                     start_time=start_time,
                     end_time=end_time,

@@ -53,23 +53,21 @@ class HummingbotDatabase:
         with self.session_maker() as session:
             query = "SELECT * FROM 'Order'"
             orders = pd.read_sql_query(text(query), session.connection())
-            orders["market"] = orders["market"]
             orders["amount"] = orders["amount"] / 1e6
             orders["price"] = orders["price"] / 1e6
-            # orders['creation_timestamp'] = pd.to_datetime(orders['creation_timestamp'], unit="ms")
-            # orders['last_update_timestamp'] = pd.to_datetime(orders['last_update_timestamp'], unit="ms")
+            orders.rename(columns={"market": "connector_name", "symbol": "trading_pair"}, inplace=True)
         return orders
 
     def get_trade_fills(self):
-        groupers = ["config_file_path", "market", "symbol"]
+        groupers = ["config_file_path", "connector_name", "trading_pair"]
         float_cols = ["amount", "price", "trade_fee_in_quote"]
         with self.session_maker() as session:
             query = "SELECT * FROM TradeFill"
             trade_fills = pd.read_sql_query(text(query), session.connection())
+            trade_fills.rename(columns={"market": "connector_name", "symbol": "trading_pair"}, inplace=True)
             trade_fills[float_cols] = trade_fills[float_cols] / 1e6
             trade_fills["cum_fees_in_quote"] = trade_fills.groupby(groupers)["trade_fee_in_quote"].cumsum()
             trade_fills["trade_fee"] = trade_fills.groupby(groupers)["cum_fees_in_quote"].diff()
-            # trade_fills["timestamp"] = pd.to_datetime(trade_fills["timestamp"], unit="ms")
         return trade_fills
 
     def get_order_status(self):
@@ -113,7 +111,7 @@ class HummingbotDatabase:
             return pd.DataFrame()
         
         # Sort by timestamp to ensure proper rolling calculation
-        trades = trades.sort_values(['symbol', 'market', 'timestamp']).copy()
+        trades = trades.sort_values(['trading_pair', 'connector_name', 'timestamp']).copy()
         
         # Create buy/sell indicator columns
         trades['is_buy'] = (trades['trade_type'].str.upper() == 'BUY').astype(int)
@@ -125,8 +123,8 @@ class HummingbotDatabase:
         trades['buy_value'] = trades['price'] * trades['amount'] * trades['is_buy']
         trades['sell_value'] = trades['price'] * trades['amount'] * trades['is_sell']
         
-        # Group by symbol and market for rolling calculations
-        grouper = ['symbol', 'market']
+        # Group by trading_pair and connector_name for rolling calculations
+        grouper = ['trading_pair', 'connector_name']
         
         # Calculate cumulative volumes and values
         trades['buy_volume'] = trades.groupby(grouper)['buy_amount'].cumsum()
@@ -188,7 +186,7 @@ class HummingbotDatabase:
         
         # Select and return relevant columns
         result_columns = [
-            'timestamp', 'price', 'amount', 'trade_type', 'symbol', 'market',
+            'timestamp', 'price', 'amount', 'trade_type', 'trading_pair', 'connector_name',
             'buy_avg_price', 'buy_volume', 'sell_avg_price', 'sell_volume',
             'net_position', 'realized_trade_pnl_pct', 'realized_trade_pnl_quote',
             'unrealized_trade_pnl_pct', 'unrealized_trade_pnl_quote',

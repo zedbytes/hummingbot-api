@@ -314,8 +314,8 @@ async def get_orders(
             try:
                 orders = await accounts_service.get_orders(
                     account_name=account_name,
-                    market=filter_request.connector_names[0] if filter_request.connector_names and len(filter_request.connector_names) == 1 else None,
-                    symbol=filter_request.trading_pairs[0] if filter_request.trading_pairs and len(filter_request.trading_pairs) == 1 else None,
+                    connector_name=filter_request.connector_names[0] if filter_request.connector_names and len(filter_request.connector_names) == 1 else None,
+                    trading_pair=filter_request.trading_pairs[0] if filter_request.trading_pairs and len(filter_request.trading_pairs) == 1 else None,
                     status=filter_request.status,
                     start_time=filter_request.start_time,
                     end_time=filter_request.end_time,
@@ -333,9 +333,9 @@ async def get_orders(
         
         # Apply filters for multiple values
         if filter_request.connector_names and len(filter_request.connector_names) > 1:
-            all_orders = [order for order in all_orders if order.get('market') in filter_request.connector_names]
+            all_orders = [order for order in all_orders if order.get('connector_name') in filter_request.connector_names]
         if filter_request.trading_pairs and len(filter_request.trading_pairs) > 1:
-            all_orders = [order for order in all_orders if order.get('symbol') in filter_request.trading_pairs]
+            all_orders = [order for order in all_orders if order.get('trading_pair') in filter_request.trading_pairs]
         
         # Sort by timestamp (most recent first) and then by cursor_id for consistency
         all_orders.sort(key=lambda x: (x.get('timestamp', 0), x.get('_cursor_id', '')), reverse=True)
@@ -406,8 +406,8 @@ async def get_trades(
             try:
                 trades = await accounts_service.get_trades(
                     account_name=account_name,
-                    market=filter_request.connector_names[0] if filter_request.connector_names and len(filter_request.connector_names) == 1 else None,
-                    symbol=filter_request.trading_pairs[0] if filter_request.trading_pairs and len(filter_request.trading_pairs) == 1 else None,
+                    connector_name=filter_request.connector_names[0] if filter_request.connector_names and len(filter_request.connector_names) == 1 else None,
+                    trading_pair=filter_request.trading_pairs[0] if filter_request.trading_pairs and len(filter_request.trading_pairs) == 1 else None,
                     trade_type=filter_request.trade_types[0] if filter_request.trade_types and len(filter_request.trade_types) == 1 else None,
                     start_time=filter_request.start_time,
                     end_time=filter_request.end_time,
@@ -425,9 +425,9 @@ async def get_trades(
         
         # Apply filters for multiple values
         if filter_request.connector_names and len(filter_request.connector_names) > 1:
-            all_trades = [trade for trade in all_trades if trade.get('market') in filter_request.connector_names]
+            all_trades = [trade for trade in all_trades if trade.get('connector_name') in filter_request.connector_names]
         if filter_request.trading_pairs and len(filter_request.trading_pairs) > 1:
-            all_trades = [trade for trade in all_trades if trade.get('symbol') in filter_request.trading_pairs]
+            all_trades = [trade for trade in all_trades if trade.get('trading_pair') in filter_request.trading_pairs]
         if filter_request.trade_types and len(filter_request.trade_types) > 1:
             all_trades = [trade for trade in all_trades if trade.get('trade_type') in filter_request.trade_types]
         
