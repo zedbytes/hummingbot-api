@@ -150,7 +150,7 @@ class HummingbotDatabase:
         
         # Matched volume for realized PnL (minimum of buy and sell volumes)
         trades['matched_volume'] = pd.concat([trades['buy_volume'], trades['sell_volume']], axis=1).min(axis=1)
-        trades['realized_trade_pnl_quote'] = trades['realized_trade_pnl_pct'] * trades['matched_volume']
+        trades['realized_trade_pnl_quote'] = trades['realized_trade_pnl_pct'] * trades['matched_volume'] * trades['buy_avg_price']
         
         # Calculate unrealized PnL based on position direction
         # For long positions (net_position > 0): use current price vs buy_avg_price
@@ -172,7 +172,23 @@ class HummingbotDatabase:
         ).fillna(0)
         
         # Calculate unrealized PnL in quote currency
-        trades['unrealized_trade_pnl_quote'] = trades['unrealized_trade_pnl_pct'] * trades['net_position'].abs()
+        trades['unrealized_trade_pnl_quote'] = 0.0
+        
+        # Long positions: use buy_avg_price as reference
+        long_mask = trades['net_position'] > 0
+        trades.loc[long_mask, 'unrealized_trade_pnl_quote'] = (
+            trades.loc[long_mask, 'unrealized_trade_pnl_pct'] * 
+            trades.loc[long_mask, 'net_position'].abs() * 
+            trades.loc[long_mask, 'buy_avg_price']
+        )
+        
+        # Short positions: use sell_avg_price as reference  
+        short_mask = trades['net_position'] < 0
+        trades.loc[short_mask, 'unrealized_trade_pnl_quote'] = (
+            trades.loc[short_mask, 'unrealized_trade_pnl_pct'] * 
+            trades.loc[short_mask, 'net_position'].abs() * 
+            trades.loc[short_mask, 'sell_avg_price']
+        )
         
         # Fees are already in trade_fee_in_quote column
         trades['fees_quote'] = trades['trade_fee_in_quote']
