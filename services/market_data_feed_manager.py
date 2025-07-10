@@ -414,12 +414,58 @@ class MarketDataFeedManager:
                 elif 'quote_price' in kwargs:
                     # Get quote volume for price
                     result = order_book.get_quote_volume_for_price(is_buy, kwargs['quote_price'])
+                    
+                    # Check if quote crosses the book (no available volume at this price)
+                    if result.result_volume is None or result.result_price is None:
+                        # Get current market prices for comparison
+                        snapshot = order_book.snapshot
+                        best_bid = float(snapshot[0].iloc[0]["price"]) if not snapshot[0].empty else None
+                        best_ask = float(snapshot[1].iloc[0]["price"]) if not snapshot[1].empty else None
+                        mid_price = (best_bid + best_ask) / 2 if best_bid and best_ask else None
+                        
+                        # Determine if quote crosses the book
+                        query_price = float(kwargs['quote_price'])
+                        crossed_reason = None
+                        suggested_price = None
+                        
+                        if is_buy:
+                            # For buy orders, crossing occurs when price > best_ask
+                            if best_ask and query_price > best_ask:
+                                crossed_reason = f"Buy price {query_price} exceeds best ask {best_ask}"
+                                suggested_price = best_ask
+                            elif best_bid and query_price < best_bid:
+                                crossed_reason = f"Buy price {query_price} below best bid {best_bid} - no liquidity available"
+                                suggested_price = best_bid
+                        else:
+                            # For sell orders, crossing occurs when price < best_bid
+                            if best_bid and query_price < best_bid:
+                                crossed_reason = f"Sell price {query_price} below best bid {best_bid}"
+                                suggested_price = best_bid
+                            elif best_ask and query_price > best_ask:
+                                crossed_reason = f"Sell price {query_price} above best ask {best_ask} - no liquidity available"
+                                suggested_price = best_ask
+                        
+                        return {
+                            "trading_pair": trading_pair,
+                            "is_buy": is_buy,
+                            "query_price": query_price,
+                            "result_volume": None,
+                            "result_quote_volume": None,
+                            "crossed_book": True,
+                            "crossed_reason": crossed_reason,
+                            "best_bid": best_bid,
+                            "best_ask": best_ask,
+                            "mid_price": mid_price,
+                            "suggested_price": suggested_price,
+                            "timestamp": current_time
+                        }
+                    
                     return {
                         "trading_pair": trading_pair,
                         "is_buy": is_buy,
                         "query_price": kwargs['quote_price'],
-                        "result_volume": float(result.result_volume) if result.result_volume else None,
-                        "result_quote_volume": float(result.result_price) if result.result_price else None,  # For quote volume queries, result_price contains the quote volume
+                        "result_quote_volume": float(result.result_volume) if result.result_volume else None,
+                        "crossed_book": False,
                         "timestamp": current_time
                     }
                     

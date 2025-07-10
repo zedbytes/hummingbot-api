@@ -31,6 +31,9 @@ class AccountsService:
         "xrpl": "RLUSD",
         "kraken": "USD",
     }
+    
+    # Cache for storing last successful prices by trading pair
+    _last_known_prices = {}
 
     def __init__(self,
                  account_update_interval: int = 5,
@@ -233,16 +236,34 @@ class AccountsService:
         return tokens_info
     
     async def _safe_get_last_traded_prices(self, connector, trading_pairs, timeout=10):
-        """Safely get last traded prices with timeout and error handling."""
+        """Safely get last traded prices with timeout and error handling. Preserves previous prices on failure."""
         try:
             last_traded = await asyncio.wait_for(connector.get_last_traded_prices(trading_pairs=trading_pairs), timeout=timeout)
+            
+            # Update cache with successful prices
+            for pair, price in last_traded.items():
+                if price and price > 0:
+                    self._last_known_prices[pair] = price
+            
             return last_traded
         except asyncio.TimeoutError:
             logger.error(f"Timeout getting last traded prices for trading pairs {trading_pairs}")
-            return {pair: Decimal("0") for pair in trading_pairs}
+            return self._get_fallback_prices(trading_pairs)
         except Exception as e:
             logger.error(f"Error getting last traded prices in connector {connector} for trading pairs {trading_pairs}: {e}")
-            return {pair: Decimal("0") for pair in trading_pairs}
+            return self._get_fallback_prices(trading_pairs)
+    
+    def _get_fallback_prices(self, trading_pairs):
+        """Get fallback prices using cached values, only setting to 0 if no previous price exists."""
+        fallback_prices = {}
+        for pair in trading_pairs:
+            if pair in self._last_known_prices:
+                fallback_prices[pair] = self._last_known_prices[pair]
+                logger.info(f"Using cached price {self._last_known_prices[pair]} for {pair}")
+            else:
+                fallback_prices[pair] = Decimal("0")
+                logger.warning(f"No cached price available for {pair}, using 0")
+        return fallback_prices
 
     def get_connector_config_map(self, connector_name: str):
         """
