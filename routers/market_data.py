@@ -2,8 +2,10 @@ import asyncio
 import time
 
 from fastapi import APIRouter, Request, HTTPException, Depends
-from hummingbot.data_feed.candles_feed.data_types import CandlesConfig, HistoricalCandlesConfig
+from hummingbot.data_feed.candles_feed.data_types import HistoricalCandlesConfig, CandlesConfig
 from hummingbot.data_feed.candles_feed.candles_factory import CandlesFactory
+
+from models.market_data import CandlesConfigRequest
 from services.market_data_feed_manager import MarketDataFeedManager
 from models import (
     PriceRequest, PricesResponse, FundingInfoRequest, FundingInfoResponse,
@@ -17,7 +19,7 @@ router = APIRouter(tags=["Market Data"], prefix="/market-data")
 
 
 @router.post("/candles")
-async def get_candles(request: Request, candles_config: CandlesConfig):
+async def get_candles(request: Request, candles_config: CandlesConfigRequest):
     """
     Get real-time candles data for a specific trading pair.
     
@@ -36,7 +38,10 @@ async def get_candles(request: Request, candles_config: CandlesConfig):
         market_data_feed_manager: MarketDataFeedManager = request.app.state.market_data_feed_manager
         
         # Get or create the candles feed (this will start it automatically and track access time)
-        candles_feed = market_data_feed_manager.get_candles_feed(candles_config)
+        candles_cfg = CandlesConfig(
+            connector=candles_config.connector_name, trading_pair=candles_config.trading_pair,
+            interval=candles_config.interval, max_records=candles_config.max_records)
+        candles_feed = market_data_feed_manager.get_candles_feed(candles_cfg)
         
         # Wait for the candles feed to be ready
         while not candles_feed.ready:
