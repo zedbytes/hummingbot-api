@@ -1,7 +1,8 @@
-from typing import Dict, List, Optional, Any
-from pydantic import BaseModel, Field
 from datetime import datetime
 from decimal import Decimal
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
 
 
 class CandleData(BaseModel):
@@ -13,6 +14,19 @@ class CandleData(BaseModel):
     close: float = Field(description="Closing price")
     volume: float = Field(description="Trading volume")
 
+class CandlesConfigRequest(BaseModel):
+    """
+    The CandlesConfig class is a data class that stores the configuration of a Candle object.
+    It has the following attributes:
+    - connector: str
+    - trading_pair: str
+    - interval: str
+    - max_records: int
+    """
+    connector_name: str
+    trading_pair: str
+    interval: str = "1m"
+    max_records: int = 500
 
 class CandlesResponse(BaseModel):
     """Response for candles data"""
