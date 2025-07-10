@@ -2,6 +2,9 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
+from hummingbot.core.clock import Clock
+from hummingbot.core.clock_mode import ClockMode
+
 # Create module-specific logger
 logger = logging.getLogger(__name__)
 from decimal import Decimal
@@ -54,9 +57,11 @@ class AccountsService:
         # Database setup for account states and orders
         self.db_manager = AsyncDatabaseManager(settings.database.url)
         self._db_initialized = False
+        self.clock = Clock(ClockMode.REALTIME, tick_size=1.0)
+        self._clock_task: Optional[asyncio.Task] = None
         
         # Initialize connector manager with db_manager
-        self.connector_manager = ConnectorManager(self.secrets_manager, self.db_manager)
+        self.connector_manager = ConnectorManager(self.secrets_manager, self.clock, self.db_manager)
 
     async def ensure_db_initialized(self):
         """Ensure database is initialized before using it."""
@@ -82,7 +87,13 @@ class AccountsService:
         """
         # Start the update loop which will call check_all_connectors
         self._update_account_state_task = asyncio.create_task(self.update_account_state_loop())
-    
+        self._clock_task = asyncio.create_task(self._run_clock())
+
+    async def _run_clock(self):
+        """Run the clock system."""
+        with self.clock as clock:
+            await clock.run()
+
     async def stop(self):
         """
         Stop all accounts service tasks and cleanup resources.
@@ -95,6 +106,11 @@ class AccountsService:
             self._update_account_state_task.cancel()
             self._update_account_state_task = None
             logger.info("Stopped account state update loop")
+
+        if self._clock_task is not None:
+            self._clock_task.cancel()
+            self._clock_task = None
+            logger.info("Stopped clock task")
         
         # Stop all connectors through the ConnectorManager
         await self.connector_manager.stop_all_connectors()

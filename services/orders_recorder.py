@@ -148,6 +148,26 @@ class OrdersRecorder:
         try:
             async with self.db_manager.get_session_context() as session:
                 order_repo = OrderRepository(session)
+                
+                # Check if order already exists first
+                existing_order = await order_repo.get_order_by_client_id(event.order_id)
+                if existing_order:
+                    logger.info(f"OrdersRecorder: Order {event.order_id} already exists with status {existing_order.status}")
+                    
+                    # Update exchange_order_id if we have it now and it was missing
+                    exchange_order_id = getattr(event, 'exchange_order_id', None)
+                    if exchange_order_id and not existing_order.exchange_order_id:
+                        existing_order.exchange_order_id = exchange_order_id
+                        logger.info(f"OrdersRecorder: Updated exchange_order_id to {exchange_order_id} for order {event.order_id}")
+                    
+                    # Update status if it's still in PENDING_CREATE or similar early state
+                    if existing_order.status in ["PENDING_CREATE", "PENDING"]:
+                        existing_order.status = "SUBMITTED"
+                        logger.info(f"OrdersRecorder: Updated status from {existing_order.status} to SUBMITTED for order {event.order_id}")
+                    
+                    await session.flush()
+                    return
+                
                 order_data = {
                     "client_order_id": event.order_id,
                     "account_name": self.account_name,
@@ -323,8 +343,20 @@ class OrdersRecorder:
                             "error_message": self._extract_error_message(event)
                         }
                     
-                    await order_repo.create_order(order_data)
-                    logger.info(f"Created failed order record for {event.order_id}")
+                    try:
+                        await order_repo.create_order(order_data)
+                        logger.info(f"Created failed order record for {event.order_id}")
+                    except Exception as create_error:
+                        # If creation fails due to duplicate key, try to update existing order
+                        if "duplicate key" in str(create_error).lower() or "unique constraint" in str(create_error).lower():
+                            logger.info(f"Order {event.order_id} already exists, updating status to FAILED")
+                            await order_repo.update_order_status(
+                                client_order_id=event.order_id,
+                                status="FAILED",
+                                error_message=self._extract_error_message(event)
+                            )
+                        else:
+                            raise create_error
                     
         except Exception as e:
             logger.error(f"Error recording order failure: {e}")
