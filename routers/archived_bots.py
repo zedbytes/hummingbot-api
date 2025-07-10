@@ -110,6 +110,7 @@ async def get_database_performance(db_path: str):
             "final_realized_pnl_quote": float(final_row.get('realized_trade_pnl_quote', 0)), 
             "final_unrealized_pnl_quote": float(final_row.get('unrealized_trade_pnl_quote', 0)),
             "total_fees_quote": float(performance_data['fees_quote'].sum()),
+            "total_volume_quote": float(performance_data['cum_volume_quote'].iloc[-1] if len(performance_data) > 0 else 0),
             "final_net_position": float(final_row.get('net_position', 0)),
             "trading_pairs": performance_data['trading_pair'].unique().tolist(),
             "connector_names": performance_data['connector_name'].unique().tolist()

@@ -184,13 +184,17 @@ class HummingbotDatabase:
             trades['fees_quote']
         )
         
+        # Calculate cumulative volume in quote currency
+        trades['volume_quote'] = trades['price'] * trades['amount']
+        trades['cum_volume_quote'] = trades.groupby(grouper)['volume_quote'].cumsum()
+        
         # Select and return relevant columns
         result_columns = [
             'timestamp', 'price', 'amount', 'trade_type', 'trading_pair', 'connector_name',
             'buy_avg_price', 'buy_volume', 'sell_avg_price', 'sell_volume',
             'net_position', 'realized_trade_pnl_pct', 'realized_trade_pnl_quote',
             'unrealized_trade_pnl_pct', 'unrealized_trade_pnl_quote',
-            'fees_quote', 'net_pnl_quote'
+            'fees_quote', 'net_pnl_quote', 'volume_quote', 'cum_volume_quote'
         ]
         
         return trades[result_columns].sort_values('timestamp')
