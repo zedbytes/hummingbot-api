@@ -61,7 +61,7 @@ class AccountsService:
         self._clock_task: Optional[asyncio.Task] = None
         
         # Initialize connector manager with db_manager
-        self.connector_manager = ConnectorManager(self.secrets_manager, self.clock, self.db_manager)
+        self.connector_manager = ConnectorManager(self.secrets_manager, self.db_manager)
 
     async def ensure_db_initialized(self):
         """Ensure database is initialized before using it."""
@@ -209,8 +209,6 @@ class AccountsService:
             except Exception as e:
                 logger.error(f"Error initializing connector {connector_name} for account {account_name}: {e}")
 
-
-
     async def update_account_state(self):
         """Update account state for all connectors."""
         all_connectors = self.connector_manager.get_all_connectors()
@@ -300,7 +298,9 @@ class AccountsService:
         """
         try:
             # Update the connector keys (this saves the credentials to file and validates them)
-            await self.connector_manager.update_connector_keys(account_name, connector_name, credentials)
+            connector = await self.connector_manager.update_connector_keys(account_name, connector_name, credentials)
+            self.clock.add_iterator(connector)
+            await self.update_account_state()
         except Exception as e:
             logger.error(f"Error adding connector credentials for account {account_name}: {e}")
             await self.delete_credentials(account_name, connector_name)
