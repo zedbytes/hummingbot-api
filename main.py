@@ -22,49 +22,49 @@ from hummingbot.client.config import config_helpers
 config_helpers.save_to_yml = patched_save_to_yml
 
 # Monkey patch start_network to conditionally start order book tracker
-async def patched_start_network(self):
-    """
-    Patched version of start_network that conditionally starts the order book tracker.
-    Only starts order book tracker when trading pairs are configured to avoid issues.
-    """
-    import logging
-    from hummingbot.core.utils.async_utils import safe_ensure_future
-    
-    logger = logging.getLogger(__name__)
-    logger.debug(f"Starting network for {self.__class__.__name__} (patched)")
-    
-    # Stop any existing network first
-    self._stop_network()
-    
-    # Check if we have trading pairs configured
-    has_trading_pairs = hasattr(self, '_trading_pairs') and len(self._trading_pairs) > 0
-    
-    # Start order book tracker only if we have trading pairs
-    if has_trading_pairs:
-        logger.debug(f"Starting order book tracker for {self.__class__.__name__} with {len(self._trading_pairs)} trading pairs")
-        self.order_book_tracker.start()
-    else:
-        logger.debug(f"Skipping order book tracker for {self.__class__.__name__} - no trading pairs configured")
-    
-    # Start the essential polling tasks if trading is required
-    if self.is_trading_required:
-        try:
-            self._trading_rules_polling_task = safe_ensure_future(self._trading_rules_polling_loop())
-            self._trading_fees_polling_task = safe_ensure_future(self._trading_fees_polling_loop())
-            self._status_polling_task = safe_ensure_future(self._status_polling_loop())
-            self._user_stream_tracker_task = self._create_user_stream_tracker_task()
-            self._user_stream_event_listener_task = safe_ensure_future(self._user_stream_event_listener())
-            self._lost_orders_update_task = safe_ensure_future(self._lost_orders_update_polling_loop())
-            
-            logger.debug(f"Started network tasks for {self.__class__.__name__}")
-        except Exception as e:
-            logger.error(f"Error starting network for {self.__class__.__name__}: {e}")
-    else:
-        logger.debug(f"Trading not required for {self.__class__.__name__}, skipping network start")
-
-# Apply the start_network patch - this will be applied to ExchangePyBase after import
-from hummingbot.connector.exchange_py_base import ExchangePyBase
-ExchangePyBase.start_network = patched_start_network
+# async def patched_start_network(self):
+#     """
+#     Patched version of start_network that conditionally starts the order book tracker.
+#     Only starts order book tracker when trading pairs are configured to avoid issues.
+#     """
+#     import logging
+#     from hummingbot.core.utils.async_utils import safe_ensure_future
+#
+#     logger = logging.getLogger(__name__)
+#     logger.debug(f"Starting network for {self.__class__.__name__} (patched)")
+#
+#     # Stop any existing network first
+#     self._stop_network()
+#
+#     # Check if we have trading pairs configured
+#     has_trading_pairs = hasattr(self, '_trading_pairs') and len(self._trading_pairs) > 0
+#
+#     # Start order book tracker only if we have trading pairs
+#     if has_trading_pairs:
+#         logger.debug(f"Starting order book tracker for {self.__class__.__name__} with {len(self._trading_pairs)} trading pairs")
+#         self.order_book_tracker.start()
+#     else:
+#         logger.debug(f"Skipping order book tracker for {self.__class__.__name__} - no trading pairs configured")
+#
+#     # Start the essential polling tasks if trading is required
+#     if self.is_trading_required:
+#         try:
+#             self._trading_rules_polling_task = safe_ensure_future(self._trading_rules_polling_loop())
+#             self._trading_fees_polling_task = safe_ensure_future(self._trading_fees_polling_loop())
+#             self._status_polling_task = safe_ensure_future(self._status_polling_loop())
+#             self._user_stream_tracker_task = self._create_user_stream_tracker_task()
+#             self._user_stream_event_listener_task = safe_ensure_future(self._user_stream_event_listener())
+#             self._lost_orders_update_task = safe_ensure_future(self._lost_orders_update_polling_loop())
+#
+#             logger.debug(f"Started network tasks for {self.__class__.__name__}")
+#         except Exception as e:
+#             logger.error(f"Error starting network for {self.__class__.__name__}: {e}")
+#     else:
+#         logger.debug(f"Trading not required for {self.__class__.__name__}, skipping network start")
+#
+# # Apply the start_network patch - this will be applied to ExchangePyBase after import
+# from hummingbot.connector.exchange_py_base import ExchangePyBase
+# ExchangePyBase.start_network = patched_start_network
 
 from hummingbot.core.rate_oracle.rate_oracle import RateOracle
 

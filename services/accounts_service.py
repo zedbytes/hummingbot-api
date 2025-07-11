@@ -1,25 +1,22 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
-
-from hummingbot.core.clock import Clock
-from hummingbot.core.clock_mode import ClockMode
-
-# Create module-specific logger
-logger = logging.getLogger(__name__)
 from decimal import Decimal
 from typing import Dict, List, Optional
 
 from fastapi import HTTPException
 from hummingbot.client.config.config_crypt import ETHKeyFileSecretManger
 from hummingbot.core.data_type.common import OrderType, TradeType, PositionAction, PositionMode
+from hummingbot.strategy_v2.executors.data_types import ConnectorPair
 
 from config import settings
 from database import AsyncDatabaseManager, AccountRepository, OrderRepository, TradeRepository, FundingRepository
 from services.market_data_feed_manager import MarketDataFeedManager
 from utils.connector_manager import ConnectorManager
-
 from utils.file_system import fs_util
+
+# Create module-specific logger
+logger = logging.getLogger(__name__)
 
 
 class AccountsService:
@@ -35,30 +32,32 @@ class AccountsService:
         "kraken": "USD",
     }
     
-    # Cache for storing last successful prices by trading pair
+    # Cache for storing last successful prices by trading pair with timestamps
     _last_known_prices = {}
+    _price_update_interval = 60  # Update prices every 60 seconds
 
     def __init__(self,
                  account_update_interval: int = 5,
-                 default_quote: str = "USDT"):
+                 default_quote: str = "USDT",
+                 market_data_feed_manager: Optional[MarketDataFeedManager] = None):
         """
         Initialize the AccountsService.
         
         Args:
             account_update_interval: How often to update account states in minutes (default: 5)
             default_quote: Default quote currency for trading pairs (default: "USDT")
+            market_data_feed_manager: Market data feed manager for price caching (optional)
         """
         self.secrets_manager = ETHKeyFileSecretManger(settings.security.config_password)
         self.accounts_state = {}
         self.update_account_state_interval = account_update_interval * 60
         self.default_quote = default_quote
+        self.market_data_feed_manager = market_data_feed_manager
         self._update_account_state_task: Optional[asyncio.Task] = None
         
         # Database setup for account states and orders
         self.db_manager = AsyncDatabaseManager(settings.database.url)
         self._db_initialized = False
-        self.clock = Clock(ClockMode.REALTIME, tick_size=1.0)
-        self._clock_task: Optional[asyncio.Task] = None
         
         # Initialize connector manager with db_manager
         self.connector_manager = ConnectorManager(self.secrets_manager, self.db_manager)
@@ -82,17 +81,11 @@ class AccountsService:
     def start(self):
         """
         Start the loop that updates the account state at a fixed interval.
-        Note: Balance updates are now handled automatically by connector.start_network()
+        Note: Balance updates are now handled by manual connector state updates.
         :return:
         """
         # Start the update loop which will call check_all_connectors
         self._update_account_state_task = asyncio.create_task(self.update_account_state_loop())
-        self._clock_task = asyncio.create_task(self._run_clock())
-
-    async def _run_clock(self):
-        """Run the clock system."""
-        with self.clock as clock:
-            await clock.run()
 
     async def stop(self):
         """
@@ -106,11 +99,6 @@ class AccountsService:
             self._update_account_state_task.cancel()
             self._update_account_state_task = None
             logger.info("Stopped account state update loop")
-
-        if self._clock_task is not None:
-            self._clock_task.cancel()
-            self._clock_task = None
-            logger.info("Stopped clock task")
         
         # Stop all connectors through the ConnectorManager
         await self.connector_manager.stop_all_connectors()
@@ -120,12 +108,14 @@ class AccountsService:
     async def update_account_state_loop(self):
         """
         The loop that updates the account state at a fixed interval.
-        Note: Balance updates are now handled automatically by connector.start_network()
+        This now includes manual connector state updates.
         :return:
         """
         while True:
             try:
                 await self.check_all_connectors()
+                # Update all connector states (balances, orders, positions, trading rules)
+                await self.connector_manager.update_all_connector_states()
                 await self.update_account_state()
                 await self.dump_account_state()
             except Exception as e:
@@ -209,6 +199,50 @@ class AccountsService:
             except Exception as e:
                 logger.error(f"Error initializing connector {connector_name} for account {account_name}: {e}")
 
+    def _initialize_rate_sources_for_pairs(self, connector_name: str, trading_pairs: List[str]):
+        """
+        Helper method to initialize rate sources for trading pairs.
+        
+        :param connector_name: The name of the connector.
+        :param trading_pairs: List of trading pairs to initialize.
+        """
+        if not trading_pairs or not self.market_data_feed_manager:
+            return
+            
+        try:
+            connector_pairs = [ConnectorPair(connector_name=connector_name, trading_pair=trading_pair) 
+                             for trading_pair in trading_pairs]
+            self.market_data_feed_manager.market_data_provider.initialize_rate_sources(connector_pairs)
+            logger.info(f"Initialized rate sources for {len(trading_pairs)} trading pairs in {connector_name}")
+        except Exception as e:
+            logger.error(f"Error initializing rate sources for {connector_name}: {e}")
+
+    async def _initialize_price_tracking(self, account_name: str, connector_name: str, connector):
+        """
+        Initialize price tracking for a connector's tokens using MarketDataProvider.
+        
+        :param account_name: The name of the account.
+        :param connector_name: The name of the connector.
+        :param connector: The connector instance.
+        """
+        try:
+            # Get current balances to determine which tokens need price tracking
+            balances = connector.get_all_balances()
+            unique_tokens = [token for token, value in balances.items() if 
+                           value != Decimal("0") and token not in settings.banned_tokens and "USD" not in token]
+            
+            if unique_tokens:
+                # Create trading pairs for price tracking
+                trading_pairs = [self.get_default_market(token, connector_name) for token in unique_tokens]
+                
+                # Initialize rate sources using helper method
+                self._initialize_rate_sources_for_pairs(connector_name, trading_pairs)
+                
+                logger.info(f"Initialized price tracking for {len(trading_pairs)} trading pairs in {connector_name} (Account: {account_name})")
+                
+        except Exception as e:
+            logger.error(f"Error initializing price tracking for {connector_name} in account {account_name}: {e}")
+
     async def update_account_state(self):
         """Update account state for all connectors."""
         all_connectors = self.connector_manager.get_all_connectors()
@@ -218,19 +252,48 @@ class AccountsService:
                 self.accounts_state[account_name] = {}
             for connector_name, connector in connectors.items():
                 try:
-                    tokens_info = await self._get_connector_tokens_info(connector, connector_name)
+                    tokens_info = await self._get_connector_tokens_info(connector, connector_name, self.market_data_feed_manager)
                     self.accounts_state[account_name][connector_name] = tokens_info
                 except Exception as e:
                     logger.error(f"Error updating balances for connector {connector_name} in account {account_name}: {e}")
                     self.accounts_state[account_name][connector_name] = []
 
-    async def _get_connector_tokens_info(self, connector, connector_name: str) -> List[Dict]:
-        """Get token info from a connector instance."""
+    async def _get_connector_tokens_info(self, connector, connector_name: str, market_data_manager: Optional[MarketDataFeedManager] = None) -> List[Dict]:
+        """Get token info from a connector instance using cached prices when available."""
         balances = [{"token": key, "units": value} for key, value in connector.get_all_balances().items() if
                     value != Decimal("0") and key not in settings.banned_tokens]
         unique_tokens = [balance["token"] for balance in balances]
         trading_pairs = [self.get_default_market(token, connector_name) for token in unique_tokens if "USD" not in token]
-        last_traded_prices = await self._safe_get_last_traded_prices(connector, trading_pairs)
+        
+        # Try to get cached prices first, fallback to live prices if needed
+        prices_from_cache = {}
+        trading_pairs_need_update = []
+        
+        if market_data_manager:
+            for trading_pair in trading_pairs:
+                try:
+                    cached_price = market_data_manager.market_data_provider.get_rate(trading_pair)
+                    if cached_price > 0:
+                        prices_from_cache[trading_pair] = cached_price
+                    else:
+                        trading_pairs_need_update.append(trading_pair)
+                except Exception:
+                    trading_pairs_need_update.append(trading_pair)
+        else:
+            trading_pairs_need_update = trading_pairs
+        
+        # Add new trading pairs to market data provider if they need updates
+        if trading_pairs_need_update:
+            self._initialize_rate_sources_for_pairs(connector_name, trading_pairs_need_update)
+            logger.info(f"Added {len(trading_pairs_need_update)} new trading pairs to market data provider: {trading_pairs_need_update}")
+        
+        # Get fresh prices for pairs not in cache or with stale/zero prices
+        fresh_prices = {}
+        if trading_pairs_need_update:
+            fresh_prices = await self._safe_get_last_traded_prices(connector, trading_pairs_need_update)
+        
+        # Combine cached and fresh prices
+        all_prices = {**prices_from_cache, **fresh_prices}
         
         tokens_info = []
         for balance in balances:
@@ -239,7 +302,8 @@ class AccountsService:
                 price = Decimal("1")
             else:
                 market = self.get_default_market(balance["token"], connector_name)
-                price = Decimal(last_traded_prices.get(market, 0))
+                price = Decimal(str(all_prices.get(market, 0)))
+                
             tokens_info.append({
                 "token": balance["token"],
                 "units": float(balance["units"]),
@@ -299,7 +363,11 @@ class AccountsService:
         try:
             # Update the connector keys (this saves the credentials to file and validates them)
             connector = await self.connector_manager.update_connector_keys(account_name, connector_name, credentials)
-            self.clock.add_iterator(connector)
+            
+            # Initialize price tracking for this connector's tokens if market data manager is available
+            if self.market_data_feed_manager:
+                await self._initialize_price_tracking(account_name, connector_name, connector)
+            
             await self.update_account_state()
         except Exception as e:
             logger.error(f"Error adding connector credentials for account {account_name}: {e}")
