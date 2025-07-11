@@ -30,6 +30,7 @@ async def get_portfolio_state(
     Returns:
         Dict containing account states with connector balances and token information
     """
+    await accounts_service.update_account_state()
     all_states = accounts_service.get_accounts_state()
     
     # Apply account name filter first
