@@ -1,4 +1,6 @@
 import logging
+import math
+
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -736,18 +738,12 @@ def _standardize_in_flight_order_response(order, account_name: str, connector_na
         "trading_pair": order.trading_pair,
         "trade_type": order.trade_type.name,
         "order_type": order.order_type.name,
-        "amount": float(order.amount),
-        "price": float(order.price) if order.price else None,
+        "amount": float(order.amount) if order.amount and not math.isnan(float(order.amount)) else 0,
+        "price": float(order.price) if order.price and not math.isnan(float(order.price)) else None,
         "status": status,
-        "filled_amount": float(getattr(order, "executed_amount_base", 0) or 0),
-        "average_fill_price": (
-            float(getattr(order, "last_executed_price", 0) or 0) if getattr(order, "last_executed_price", None) else None
-        ),
-        "fee_paid": (
-            float(getattr(order, "cumulative_fee_paid_quote", 0) or 0)
-            if getattr(order, "cumulative_fee_paid_quote", None)
-            else None
-        ),
+        "filled_amount": float(getattr(order, "executed_amount_base", 0) or 0) if not math.isnan(float(getattr(order, "executed_amount_base", 0) or 0)) else 0,
+        "average_fill_price": float(getattr(order, "last_executed_price", 0)) if getattr(order, "last_executed_price", None) and not math.isnan(float(getattr(order, "last_executed_price", 0))) else None,
+        "fee_paid": float(getattr(order, "cumulative_fee_paid_quote", 0)) if getattr(order, "cumulative_fee_paid_quote", None) and not math.isnan(float(getattr(order, "cumulative_fee_paid_quote", 0))) else None,
         "fee_currency": None,  # InFlightOrder doesn't store fee currency directly
         "created_at": created_at,
         "updated_at": updated_at,
