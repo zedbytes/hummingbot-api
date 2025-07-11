@@ -4,8 +4,6 @@ import time
 from decimal import Decimal
 from typing import Dict, List, Optional
 
-from hummingbot.core.clock import Clock, ClockMode
-
 # Create module-specific logger
 logger = logging.getLogger(__name__)
 
@@ -29,14 +27,13 @@ class ConnectorManager:
     This is the single source of truth for all connector instances.
     """
 
-    def __init__(self, secrets_manager: ETHKeyFileSecretManger, clock: Clock, db_manager=None):
+    def __init__(self, secrets_manager: ETHKeyFileSecretManger, db_manager=None):
         self.secrets_manager = secrets_manager
         self.db_manager = db_manager
         self._connector_cache: Dict[str, ConnectorBase] = {}
         self._orders_recorders: Dict[str, any] = {}
         self._funding_recorders: Dict[str, any] = {}
         self._status_polling_tasks: Dict[str, asyncio.Task] = {}
-        self.clock = clock
 
     async def get_connector(self, account_name: str, connector_name: str):
         """
@@ -200,7 +197,6 @@ class ConnectorManager:
         cache_key = f"{account_name}:{connector_name}"
         # Create the base connector
         connector = self._create_connector(account_name, connector_name)
-        self.clock.add_iterator(connector)
 
         # Initialize symbol map
         await connector._initialize_trading_pair_symbol_map()
