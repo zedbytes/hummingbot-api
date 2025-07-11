@@ -14,8 +14,9 @@ from hummingbot.client.settings import AllConnectorSettings
 from hummingbot.connector.connector_base import ConnectorBase
 from hummingbot.core.data_type.common import OrderType, PositionAction, PositionMode, TradeType
 from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderState
+from hummingbot.core.utils.async_utils import safe_ensure_future
 
-from utils.file_system import FileSystemUtil, fs_util
+from utils.file_system import fs_util
 from utils.hummingbot_api_config_adapter import HummingbotAPIConfigAdapter
 from utils.security import BackendAPISecurity
 
@@ -201,6 +202,9 @@ class ConnectorManager:
         # Initialize symbol map
         await connector._initialize_trading_pair_symbol_map()
 
+        # Update trading rules
+        await connector._update_trading_rules()
+
         # Update initial balances
         await connector._update_balances()
 
@@ -237,11 +241,119 @@ class ConnectorManager:
                 funding_recorder.start(connector)
                 self._funding_recorders[cache_key] = funding_recorder
 
-        # Network will be started automatically by the clock system (using patched start_network)
+        # Start network manually without clock system
+        await self._start_connector_network(connector)
+        
+        # Perform initial update of connector state
+        await self._update_connector_state(connector, connector_name)
 
         logger.info(f"Initialized connector {connector_name} for account {account_name}")
         return connector
 
+    async def _start_connector_network(self, connector: ConnectorBase):
+        """
+        Start connector network tasks manually without clock system.
+        Based on the original start_network method but without order book tracker.
+        """
+        try:
+            # Stop any existing network tasks
+            await self._stop_connector_network(connector)
+            
+            # Start trading rules polling
+            connector._trading_rules_polling_task = safe_ensure_future(connector._trading_rules_polling_loop())
+
+            # Start trading fees polling
+            connector._trading_fees_polling_task = safe_ensure_future(connector._trading_fees_polling_loop())
+
+            # Start user stream tracker (websocket connection)
+            connector._user_stream_tracker_task = connector._create_user_stream_tracker_task()
+
+            # Start user stream event listener
+            connector._user_stream_event_listener_task = safe_ensure_future(connector._user_stream_event_listener())
+
+            # Start lost orders update task
+            connector._lost_orders_update_task = safe_ensure_future(connector._lost_orders_update_polling_loop())
+
+            logger.info(f"Started connector network tasks for {connector}")
+
+        except Exception as e:
+            logger.error(f"Error starting connector network: {e}")
+            raise
+
+    async def _stop_connector_network(self, connector: ConnectorBase):
+        """
+        Stop connector network tasks.
+        """
+        try:
+            # Stop trading rules polling
+            if connector._trading_rules_polling_task:
+                connector._trading_rules_polling_task.cancel()
+                connector._trading_rules_polling_task = None
+                
+            # Stop trading fees polling
+            if connector._trading_fees_polling_task:
+                connector._trading_fees_polling_task.cancel()
+                connector._trading_fees_polling_task = None
+                
+            # Stop status polling
+            if connector._status_polling_task:
+                connector._status_polling_task.cancel()
+                connector._status_polling_task = None
+                
+            # Stop user stream tracker
+            if connector._user_stream_tracker_task:
+                connector._user_stream_tracker_task.cancel()
+                connector._user_stream_tracker_task = None
+                
+            # Stop user stream event listener
+            if connector._user_stream_event_listener_task:
+                connector._user_stream_event_listener_task.cancel()
+                connector._user_stream_event_listener_task = None
+                
+            # Stop lost orders update task
+            if connector._lost_orders_update_task:
+                connector._lost_orders_update_task.cancel()
+                connector._lost_orders_update_task = None
+                
+        except Exception as e:
+            logger.error(f"Error stopping connector network: {e}")
+
+    async def _update_connector_state(self, connector: ConnectorBase, connector_name: str):
+        """
+        Update connector state including balances, orders, positions, and trading rules.
+        This function can be called both during initialization and periodically.
+        """
+        try:
+            # Update balances
+            await connector._update_balances()
+            
+            # Update trading rules
+            await connector._update_trading_rules()
+            
+            # Update positions for perpetual connectors
+            if "_perpetual" in connector_name:
+                await connector._update_positions()
+            
+            # Update order status for in-flight orders
+            if hasattr(connector, '_update_order_status') and connector.in_flight_orders:
+                await connector._update_order_status()
+                
+            logger.debug(f"Updated connector state for {connector_name}")
+            
+        except Exception as e:
+            logger.error(f"Error updating connector state for {connector_name}: {e}")
+
+    async def update_all_connector_states(self):
+        """
+        Update state for all cached connectors.
+        This can be called periodically to refresh connector data.
+        """
+        for cache_key, connector in self._connector_cache.items():
+            account_name, connector_name = cache_key.split(":", 1)
+            try:
+                await self._update_connector_state(connector, connector_name)
+            except Exception as e:
+                logger.error(f"Error updating state for {account_name}/{connector_name}: {e}")
 
     async def _load_existing_orders_from_database(self, connector: ConnectorBase, account_name: str, connector_name: str):
         """
@@ -382,11 +494,11 @@ class ConnectorManager:
             except Exception as e:
                 logger.error(f"Error stopping manual status polling for {account_name}/{connector_name}: {e}")
 
-        # Stop connector netwowrk if exists
+        # Stop connector network if exists
         if cache_key in self._connector_cache:
             try:
                 connector = self._connector_cache[cache_key]
-                await connector.stop_network()
+                await self._stop_connector_network(connector)
                 logger.info(f"Stopped connector network for {account_name}/{connector_name}")
             except Exception as e:
                 logger.error(f"Error stopping connector network for {account_name}/{connector_name}: {e}")
