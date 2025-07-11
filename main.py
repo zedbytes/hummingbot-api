@@ -129,27 +129,6 @@ async def lifespan(app: FastAPI):
         BackendAPISecurity.store_password_verification(secrets_manager)
         logging.info("Created password verification file for master_account")
     
-    # Initialize services
-    bots_orchestrator = BotsOrchestrator(
-        broker_host=settings.broker.host,
-        broker_port=settings.broker.port,
-        broker_username=settings.broker.username,
-        broker_password=settings.broker.password
-    )
-    
-    accounts_service = AccountsService(
-        account_update_interval=settings.app.account_update_interval
-    )
-    docker_service = DockerService()
-    bot_archiver = BotArchiver(
-        settings.aws.api_key,
-        settings.aws.secret_key,
-        settings.aws.s3_default_bucket_name
-    )
-    
-    # Initialize database
-    await accounts_service.ensure_db_initialized()
-    
     # Initialize MarketDataProvider with empty connectors (will use non-trading connectors)
     market_data_provider = MarketDataProvider(connectors={})
     
@@ -160,6 +139,28 @@ async def lifespan(app: FastAPI):
         cleanup_interval=settings.market_data.cleanup_interval,
         feed_timeout=settings.market_data.feed_timeout
     )
+    
+    # Initialize services
+    bots_orchestrator = BotsOrchestrator(
+        broker_host=settings.broker.host,
+        broker_port=settings.broker.port,
+        broker_username=settings.broker.username,
+        broker_password=settings.broker.password
+    )
+    
+    accounts_service = AccountsService(
+        account_update_interval=settings.app.account_update_interval,
+        market_data_feed_manager=market_data_feed_manager
+    )
+    docker_service = DockerService()
+    bot_archiver = BotArchiver(
+        settings.aws.api_key,
+        settings.aws.secret_key,
+        settings.aws.s3_default_bucket_name
+    )
+    
+    # Initialize database
+    await accounts_service.ensure_db_initialized()
     
     # Store services in app state
     app.state.bots_orchestrator = bots_orchestrator
