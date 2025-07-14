@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 # Load environment variables early
 load_dotenv()
 
+VERSION = "1.0.0"
+
 # Monkey patch save_to_yml to prevent writes to library directory
 def patched_save_to_yml(yml_path, cm):
     """Patched version of save_to_yml that prevents writes to library directory"""
@@ -20,51 +22,6 @@ def patched_save_to_yml(yml_path, cm):
 # Apply the patch before importing hummingbot components
 from hummingbot.client.config import config_helpers
 config_helpers.save_to_yml = patched_save_to_yml
-
-# Monkey patch start_network to conditionally start order book tracker
-# async def patched_start_network(self):
-#     """
-#     Patched version of start_network that conditionally starts the order book tracker.
-#     Only starts order book tracker when trading pairs are configured to avoid issues.
-#     """
-#     import logging
-#     from hummingbot.core.utils.async_utils import safe_ensure_future
-#
-#     logger = logging.getLogger(__name__)
-#     logger.debug(f"Starting network for {self.__class__.__name__} (patched)")
-#
-#     # Stop any existing network first
-#     self._stop_network()
-#
-#     # Check if we have trading pairs configured
-#     has_trading_pairs = hasattr(self, '_trading_pairs') and len(self._trading_pairs) > 0
-#
-#     # Start order book tracker only if we have trading pairs
-#     if has_trading_pairs:
-#         logger.debug(f"Starting order book tracker for {self.__class__.__name__} with {len(self._trading_pairs)} trading pairs")
-#         self.order_book_tracker.start()
-#     else:
-#         logger.debug(f"Skipping order book tracker for {self.__class__.__name__} - no trading pairs configured")
-#
-#     # Start the essential polling tasks if trading is required
-#     if self.is_trading_required:
-#         try:
-#             self._trading_rules_polling_task = safe_ensure_future(self._trading_rules_polling_loop())
-#             self._trading_fees_polling_task = safe_ensure_future(self._trading_fees_polling_loop())
-#             self._status_polling_task = safe_ensure_future(self._status_polling_loop())
-#             self._user_stream_tracker_task = self._create_user_stream_tracker_task()
-#             self._user_stream_event_listener_task = safe_ensure_future(self._user_stream_event_listener())
-#             self._lost_orders_update_task = safe_ensure_future(self._lost_orders_update_polling_loop())
-#
-#             logger.debug(f"Started network tasks for {self.__class__.__name__}")
-#         except Exception as e:
-#             logger.error(f"Error starting network for {self.__class__.__name__}: {e}")
-#     else:
-#         logger.debug(f"Trading not required for {self.__class__.__name__}, skipping network start")
-#
-# # Apply the start_network patch - this will be applied to ExchangePyBase after import
-# from hummingbot.connector.exchange_py_base import ExchangePyBase
-# ExchangePyBase.start_network = patched_start_network
 
 from hummingbot.core.rate_oracle.rate_oracle import RateOracle
 
@@ -128,10 +85,10 @@ async def lifespan(app: FastAPI):
         secrets_manager = ETHKeyFileSecretManger(password=settings.security.config_password)
         BackendAPISecurity.store_password_verification(secrets_manager)
         logging.info("Created password verification file for master_account")
-    
+
     # Initialize MarketDataProvider with empty connectors (will use non-trading connectors)
     market_data_provider = MarketDataProvider(connectors={})
-    
+
     # Initialize MarketDataFeedManager with lifecycle management
     market_data_feed_manager = MarketDataFeedManager(
         market_data_provider=market_data_provider,
@@ -139,7 +96,7 @@ async def lifespan(app: FastAPI):
         cleanup_interval=settings.market_data.cleanup_interval,
         feed_timeout=settings.market_data.feed_timeout
     )
-    
+
     # Initialize services
     bots_orchestrator = BotsOrchestrator(
         broker_host=settings.broker.host,
@@ -147,7 +104,7 @@ async def lifespan(app: FastAPI):
         broker_username=settings.broker.username,
         broker_password=settings.broker.password
     )
-    
+
     accounts_service = AccountsService(
         account_update_interval=settings.app.account_update_interval,
         market_data_feed_manager=market_data_feed_manager
@@ -158,34 +115,34 @@ async def lifespan(app: FastAPI):
         settings.aws.secret_key,
         settings.aws.s3_default_bucket_name
     )
-    
+
     # Initialize database
     await accounts_service.ensure_db_initialized()
-    
+
     # Store services in app state
     app.state.bots_orchestrator = bots_orchestrator
     app.state.accounts_service = accounts_service
     app.state.docker_service = docker_service
     app.state.bot_archiver = bot_archiver
     app.state.market_data_feed_manager = market_data_feed_manager
-    
+
     # Start services
     bots_orchestrator.start()
     accounts_service.start()
     market_data_feed_manager.start()
-    
+
     yield
-    
+
     # Shutdown services
     bots_orchestrator.stop()
     await accounts_service.stop()
-    
+
     # Stop market data feed manager (which will stop all feeds)
     market_data_feed_manager.stop()
-    
+
     # Clean up docker service
     docker_service.cleanup()
-    
+
     # Close database connections
     await accounts_service.db_manager.close()
 
@@ -194,7 +151,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Hummingbot API",
     description="API for managing Hummingbot trading instances",
-    version="1.0.0",
+    version=VERSION,
     lifespan=lifespan,
 )
 
@@ -249,7 +206,7 @@ app.include_router(archived_bots.router, dependencies=[Depends(auth_user)])
 async def root():
     """API root endpoint returning basic information."""
     return {
-        "name": "Backend API",
-        "version": "0.2.0",
+        "name": "Hummingbot API",
+        "version": VERSION,
         "status": "running",
     }
