@@ -1,4 +1,4 @@
-name: Backend-API Docker Buildx Workflow
+name: Hummingbot-API Docker Buildx Workflow
 
 on:
   pull_request:
@@ -36,7 +36,7 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: hummingbot/backend-api:development
+          tags: hummingbot/hummingbot-api:development
 
       - name: Build and push Latest Image
         if: github.base_ref == 'main'
@@ -46,7 +46,7 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: hummingbot/backend-api:latest
+          tags: hummingbot/hummingbot-api:latest
 
   build_release:
     if: github.event_name == 'release'
@@ -77,4 +77,4 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: hummingbot/backend-api:${{ steps.get_tag.outputs.VERSION }}
+          tags: hummingbot/hummingbot-api:${{ steps.get_tag.outputs.VERSION }}

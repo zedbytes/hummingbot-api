@@ -3,6 +3,9 @@ from decimal import Decimal
 from typing import List, Optional, Tuple
 
 import pandas_ta as ta  # noqa: F401
+from pydantic import Field, field_validator
+from pydantic_core.core_schema import ValidationInfo
+
 from hummingbot.core.data_type.common import TradeType
 from hummingbot.data_feed.candles_feed.data_types import CandlesConfig
 from hummingbot.strategy_v2.controllers.directional_trading_controller_base import (
@@ -11,8 +14,6 @@ from hummingbot.strategy_v2.controllers.directional_trading_controller_base impo
 )
 from hummingbot.strategy_v2.executors.dca_executor.data_types import DCAExecutorConfig, DCAMode
 from hummingbot.strategy_v2.executors.position_executor.data_types import TrailingStop
-from pydantic import Field, field_validator
-from pydantic_core.core_schema import ValidationInfo
 
 
 class DManV3ControllerConfig(DirectionalTradingControllerConfigBase):

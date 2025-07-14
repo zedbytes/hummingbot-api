@@ -1,35 +1,219 @@
-import os
 import secrets
+from contextlib import asynccontextmanager
 from typing import Annotated
 
+import logfire
+import logging
 from dotenv import load_dotenv
+
+# Load environment variables early
+load_dotenv()
+
+# Monkey patch save_to_yml to prevent writes to library directory
+def patched_save_to_yml(yml_path, cm):
+    """Patched version of save_to_yml that prevents writes to library directory"""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.debug(f"Skipping config write to {yml_path} (patched for API mode)")
+    # Do nothing - this prevents the original function from trying to write to the library directory
+
+# Apply the patch before importing hummingbot components
+from hummingbot.client.config import config_helpers
+config_helpers.save_to_yml = patched_save_to_yml
+
+# Monkey patch start_network to conditionally start order book tracker
+# async def patched_start_network(self):
+#     """
+#     Patched version of start_network that conditionally starts the order book tracker.
+#     Only starts order book tracker when trading pairs are configured to avoid issues.
+#     """
+#     import logging
+#     from hummingbot.core.utils.async_utils import safe_ensure_future
+#
+#     logger = logging.getLogger(__name__)
+#     logger.debug(f"Starting network for {self.__class__.__name__} (patched)")
+#
+#     # Stop any existing network first
+#     self._stop_network()
+#
+#     # Check if we have trading pairs configured
+#     has_trading_pairs = hasattr(self, '_trading_pairs') and len(self._trading_pairs) > 0
+#
+#     # Start order book tracker only if we have trading pairs
+#     if has_trading_pairs:
+#         logger.debug(f"Starting order book tracker for {self.__class__.__name__} with {len(self._trading_pairs)} trading pairs")
+#         self.order_book_tracker.start()
+#     else:
+#         logger.debug(f"Skipping order book tracker for {self.__class__.__name__} - no trading pairs configured")
+#
+#     # Start the essential polling tasks if trading is required
+#     if self.is_trading_required:
+#         try:
+#             self._trading_rules_polling_task = safe_ensure_future(self._trading_rules_polling_loop())
+#             self._trading_fees_polling_task = safe_ensure_future(self._trading_fees_polling_loop())
+#             self._status_polling_task = safe_ensure_future(self._status_polling_loop())
+#             self._user_stream_tracker_task = self._create_user_stream_tracker_task()
+#             self._user_stream_event_listener_task = safe_ensure_future(self._user_stream_event_listener())
+#             self._lost_orders_update_task = safe_ensure_future(self._lost_orders_update_polling_loop())
+#
+#             logger.debug(f"Started network tasks for {self.__class__.__name__}")
+#         except Exception as e:
+#             logger.error(f"Error starting network for {self.__class__.__name__}: {e}")
+#     else:
+#         logger.debug(f"Trading not required for {self.__class__.__name__}, skipping network start")
+#
+# # Apply the start_network patch - this will be applied to ExchangePyBase after import
+# from hummingbot.connector.exchange_py_base import ExchangePyBase
+# ExchangePyBase.start_network = patched_start_network
+
+from hummingbot.core.rate_oracle.rate_oracle import RateOracle
+
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.middleware.cors import CORSMiddleware
+from hummingbot.data_feed.market_data_provider import MarketDataProvider
+from hummingbot.client.config.config_crypt import ETHKeyFileSecretManger
 
+from utils.security import BackendAPISecurity
+from services.bots_orchestrator import BotsOrchestrator
+from services.accounts_service import AccountsService
+from services.docker_service import DockerService
+from services.market_data_feed_manager import MarketDataFeedManager
+from utils.bot_archiver import BotArchiver
 from routers import (
-    manage_accounts,
-    manage_backtesting,
-    manage_broker_messages,
-    manage_databases,
-    manage_docker,
-    manage_files,
-    manage_market_data,
-    manage_performance,
+    accounts,
+    archived_bots,
+    backtesting,
+    bot_orchestration,
+    connectors,
+    controllers,
+    docker,
+    market_data,
+    portfolio,
+    scripts,
+    trading
 )
 
-load_dotenv()
+from config import settings
+
+
+# Set up logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+# Enable debug logging for MQTT manager
+logging.getLogger('services.mqtt_manager').setLevel(logging.DEBUG)
+
+
+# Get settings from Pydantic Settings
+username = settings.security.username
+password = settings.security.password
+debug_mode = settings.security.debug_mode
+
+# Security setup
 security = HTTPBasic()
 
-username = os.getenv("USERNAME", "admin")
-password = os.getenv("PASSWORD", "admin")
-debug_mode = os.getenv("DEBUG_MODE", False)
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager for the FastAPI application.
+    Handles startup and shutdown events.
+    """
+    # Ensure password verification file exists
+    if BackendAPISecurity.new_password_required():
+        # Create secrets manager with CONFIG_PASSWORD
+        secrets_manager = ETHKeyFileSecretManger(password=settings.security.config_password)
+        BackendAPISecurity.store_password_verification(secrets_manager)
+        logging.info("Created password verification file for master_account")
+    
+    # Initialize MarketDataProvider with empty connectors (will use non-trading connectors)
+    market_data_provider = MarketDataProvider(connectors={})
+    
+    # Initialize MarketDataFeedManager with lifecycle management
+    market_data_feed_manager = MarketDataFeedManager(
+        market_data_provider=market_data_provider,
+        rate_oracle=RateOracle.get_instance(),
+        cleanup_interval=settings.market_data.cleanup_interval,
+        feed_timeout=settings.market_data.feed_timeout
+    )
+    
+    # Initialize services
+    bots_orchestrator = BotsOrchestrator(
+        broker_host=settings.broker.host,
+        broker_port=settings.broker.port,
+        broker_username=settings.broker.username,
+        broker_password=settings.broker.password
+    )
+    
+    accounts_service = AccountsService(
+        account_update_interval=settings.app.account_update_interval,
+        market_data_feed_manager=market_data_feed_manager
+    )
+    docker_service = DockerService()
+    bot_archiver = BotArchiver(
+        settings.aws.api_key,
+        settings.aws.secret_key,
+        settings.aws.s3_default_bucket_name
+    )
+    
+    # Initialize database
+    await accounts_service.ensure_db_initialized()
+    
+    # Store services in app state
+    app.state.bots_orchestrator = bots_orchestrator
+    app.state.accounts_service = accounts_service
+    app.state.docker_service = docker_service
+    app.state.bot_archiver = bot_archiver
+    app.state.market_data_feed_manager = market_data_feed_manager
+    
+    # Start services
+    bots_orchestrator.start()
+    accounts_service.start()
+    market_data_feed_manager.start()
+    
+    yield
+    
+    # Shutdown services
+    bots_orchestrator.stop()
+    await accounts_service.stop()
+    
+    # Stop market data feed manager (which will stop all feeds)
+    market_data_feed_manager.stop()
+    
+    # Clean up docker service
+    docker_service.cleanup()
+    
+    # Close database connections
+    await accounts_service.db_manager.close()
 
+
+# Initialize FastAPI with metadata and lifespan
+app = FastAPI(
+    title="Hummingbot API",
+    description="API for managing Hummingbot trading instances",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Modify in production to specific origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+logfire.configure(send_to_logfire="if-token-present", environment=settings.app.logfire_environment, service_name="hummingbot-api")
+logfire.instrument_fastapi(app)
 
 def auth_user(
     credentials: Annotated[HTTPBasicCredentials, Depends(security)],
 ):
+    """Authenticate user using HTTP Basic Auth"""
     current_username_bytes = credentials.username.encode("utf8")
     correct_username_bytes = f"{username}".encode("utf8")
     is_correct_username = secrets.compare_digest(
@@ -46,13 +230,26 @@ def auth_user(
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Basic"},
         )
+    return credentials.username
 
+# Include all routers with authentication
+app.include_router(docker.router, dependencies=[Depends(auth_user)])
+app.include_router(accounts.router, dependencies=[Depends(auth_user)])
+app.include_router(connectors.router, dependencies=[Depends(auth_user)])
+app.include_router(portfolio.router, dependencies=[Depends(auth_user)])
+app.include_router(trading.router, dependencies=[Depends(auth_user)])
+app.include_router(bot_orchestration.router, dependencies=[Depends(auth_user)])
+app.include_router(controllers.router, dependencies=[Depends(auth_user)])
+app.include_router(scripts.router, dependencies=[Depends(auth_user)])
+app.include_router(market_data.router, dependencies=[Depends(auth_user)])
+app.include_router(backtesting.router, dependencies=[Depends(auth_user)])
+app.include_router(archived_bots.router, dependencies=[Depends(auth_user)])
 
-app.include_router(manage_docker.router, dependencies=[Depends(auth_user)])
-app.include_router(manage_broker_messages.router, dependencies=[Depends(auth_user)])
-app.include_router(manage_files.router, dependencies=[Depends(auth_user)])
-app.include_router(manage_market_data.router, dependencies=[Depends(auth_user)])
-app.include_router(manage_backtesting.router, dependencies=[Depends(auth_user)])
-app.include_router(manage_databases.router, dependencies=[Depends(auth_user)])
-app.include_router(manage_performance.router, dependencies=[Depends(auth_user)])
-app.include_router(manage_accounts.router, dependencies=[Depends(auth_user)])
+@app.get("/")
+async def root():
+    """API root endpoint returning basic information."""
+    return {
+        "name": "Backend API",
+        "version": "0.2.0",
+        "status": "running",
+    }
