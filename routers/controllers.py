@@ -49,18 +49,11 @@ async def list_controller_configs():
             config_name = config_file.replace('.yml', '')
             try:
                 config = fs_util.read_yaml_file(f"conf/controllers/{config_file}")
-                configs.append({
-                    "config_name": config_name,
-                    "controller_name": config.get("controller_name", "unknown"),
-                    "controller_type": config.get("controller_type", "unknown"),
-                    "connector_name": config.get("connector_name", "unknown"),
-                    "trading_pair": config.get("trading_pair", "unknown"),
-                    "total_amount_quote": config.get("total_amount_quote", 0)
-                })
+                configs.append(config)
             except Exception as e:
                 # If config is malformed, still include it with basic info
                 configs.append({
-                    "config_name": config_name,
+                    "id": config_name,
                     "controller_name": "error",
                     "controller_type": "error", 
                     "error": str(e)
