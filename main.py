@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 # Load environment variables early
 load_dotenv()
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 # Monkey patch save_to_yml to prevent writes to library directory
 def patched_save_to_yml(yml_path, cm):
