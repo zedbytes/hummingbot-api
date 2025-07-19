@@ -26,8 +26,8 @@ class AccountsService:
     update the balances of each account.
     """
     default_quotes = {
-        "hyperliquid": "USD",
-        "hyperliquid_perpetual": "USDC",
+        "hyperliquid": "USDC",
+        "hyperliquid_perpetual": "USD",
         "xrpl": "RLUSD",
         "kraken": "USD",
     }
